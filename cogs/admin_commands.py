@@ -1,6 +1,7 @@
 import discord, random
 from discord.ext import commands
 from discord import app_commands
+import sqlite3
 
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
