@@ -34,7 +34,7 @@ async def load_extensions():
                     except discord.ClientException as e:
                         print(f'Failed to load extension {cog_name}: {e}')
 
-async def create_load_database():
+async def load_database():
     with sqlite3.connect('database.db') as connection:
         cursor = connection.cursor()
 
@@ -44,10 +44,10 @@ async def create_load_database():
             id INTEGER PRIMARY KEY,
             username TEXT NOT NULL,
             candy INTEGER DEFAULT 0,
-            rob_cooldown TEXT DEFAULT 0,
-            robbed_cooldown TEXT DEFAULT 0,
-            daily_cooldown TEXT DEFAULT 0,
-            hourly_cooldown TEXT DEFAULT 0
+            rob_cooldown REAL DEFAULT 0,
+            robbed_cooldown REAL DEFAULT 0,
+            daily_cooldown REAL DEFAULT 0,
+            hourly_cooldown REAL DEFAULT 0
         );
         '''
         cursor.execute(create_users_table_query)
@@ -77,16 +77,13 @@ class Client(commands.Bot):
         #Load our cogs
         await load_extensions()
 
-        await create_load_database()
-
-        #Add our manual sync command 
-        self.tree.add_command(self.sync_commands)
+        await load_database()
 
         #Auto sync on startup
-        #for cmd in self.tree.walk_commands():
-            #print(f"[Slash Command] /{cmd.name} - {cmd.description}")
-        #await self.tree.sync()
-        #print("Synced new commands to guild.")
+        for cmd in self.tree.walk_commands():
+           print(f"[Slash Command] /{cmd.name} - {cmd.description}")
+        await self.tree.sync()
+        print("Synced new commands to guild.")
 
         for cmd in self.tree.walk_commands():
             print(f"[Slash Command] /{cmd.name} - {cmd.description}")
@@ -94,23 +91,11 @@ class Client(commands.Bot):
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")
 
-    async def on_command_error(ctx, error):
+    async def on_command_error(self, ctx, error):
         if isinstance(error, commands.CommandNotFound):
             await ctx.send("Unknown Error.")
         else:
             raise error
-    
-    @app_commands.command(name="sync")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def sync_commands(self, interaction: discord.Interaction):
-        await load_extensions()
-
-        for cmd in self.tree.walk_commands():
-            print(f"[Slash Command] /{cmd.name} - {cmd.description}")
-    
-        await self.tree.sync()
-
-        print("Synced new commands.")
 
 if __name__ == "__main__":
     bot = Client()

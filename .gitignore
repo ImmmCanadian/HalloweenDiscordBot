@@ -5,6 +5,8 @@ __pycache__/
 
 *.db
 
+test.py
+
 # C extensions
 *.so
 

@@ -9,11 +9,9 @@ class AdminCommands(commands.Cog):
     
     @app_commands.command(name="give-candy", description="Gives a user candy.")
     @app_commands.checks.has_permissions(administrator=True)
-    async def givecandy(self, interaction: discord.Interaction , receipient: discord.Member, amount: int):
-        try:
-            await interaction.response.send_message("placeholder")
-        except Exception as e:
-            print(f"{e}")
+    async def givecandy(self, interaction: discord.Interaction , recipient: discord.Member, amount: int):
+        await interaction.response.send_message(f"Placeholder")
+
     
 
     @commands.command(name="clear_commands")
