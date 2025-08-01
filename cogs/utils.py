@@ -16,12 +16,9 @@ class Utils(commands.Cog):
                         (user_id, username))
     
 
-    async def check_user_exists(self, interaction):
+    async def check_user_exists(self, user_id, user_name):
         '''Checks if user who used interaction exists, if not calls our
         create_user function and adds them to our exisitng db.'''
-
-        user_id = interaction.user.id
-        username = interaction.user.name
 
         connection = sqlite3.connect('./database.db')
         cursor = connection.cursor()
@@ -31,14 +28,23 @@ class Utils(commands.Cog):
         result = cursor.fetchone()
 
         if result is None:
-            self.create_user(user_id, username, cursor)
+            self.create_user(user_id, user_name, cursor)
 
         connection.commit()
         connection.close()
     
-    async def check_cooldown(self, interaction: discord.Interaction, target: Optional[int] = None):
+    async def check_cooldown(self, interaction: discord.Interaction, target: Optional[discord.Member] = None):
         '''Checks if command is on cooldown for a user. For rob, additionality checks if target
         is on cooldown from being robbed'''
+
+        data = {
+            'user_on_cooldown': 0,
+            'target_on_cooldown': 0,
+            'user_time_left': 0,
+            'target_time_left': 0,
+            'cooldown_name': 0, 
+            'executed_time': 0
+        }
 
         name_reference = {
             'daily-candy': "daily_cooldown",
@@ -66,7 +72,7 @@ class Utils(commands.Cog):
 
         #Logic for checking if target has been robbed and is on cooldown
         if target != None and cooldown_name == "rob_cooldown":
-            cursor.execute(f'SELECT robbed_cooldown FROM Users WHERE id = ?', (target,))
+            cursor.execute(f'SELECT robbed_cooldown FROM Users WHERE id = ?', (target.id,))
             target_result = cursor.fetchone()
             target_result = target_result[0]
 
@@ -76,16 +82,30 @@ class Utils(commands.Cog):
         result = db_result[0]
         current_time = time.time() 
 
+        # print(f"Test {target_result + time_reference['rob_cooldown']} and {current_time}")
+        # print(target_result + time_reference['rob_cooldown'] >= current_time)
 
+        data['user_on_cooldown'] = result + cooldown_time >= current_time
+        data['user_time_left'] = current_time - (result + cooldown_time)
+        data['cooldown_name'] = cooldown_name
+        data['executed_time'] = current_time
+
+        #Check for normal commands
         if target == None:
-            return result + cooldown_time >= current_time, current_time - (result + cooldown_time), cooldown_name, current_time
+            return data
 
-        if result + cooldown_time >= current_time or target_result + time_reference['rob_cooldown'] >= current_time:
-            return True, current_time - (result + cooldown_time), cooldown_name, current_time
+        data['target_on_cooldown'] = target_result + time_reference['rob_cooldown'] >= current_time
+        data['target_time_left'] = current_time - (target_result + time_reference['rob_cooldown'])
+            
+        return data
 
-        return False, current_time - (result + cooldown_time), cooldown_name, current_time
+    def convert_seconds_to_string(self, time_left):
+        time_left = abs(int(time_left)) 
+        hours = time_left // 3600
+        minutes = (time_left % 3600) // 60
+        seconds = time_left % 60
+        return f"{hours:02}:{minutes:02}:{seconds:02}" 
 
-        
     @app_commands.command(name="sync")
     @app_commands.checks.has_permissions(administrator=True)
     async def sync_commands(self, interaction: discord.Interaction):
@@ -95,6 +115,20 @@ class Utils(commands.Cog):
         
         await self.bot.tree.sync()
         await interaction.response.send_message("Commands synced!", ephemeral=True)
+
+    @app_commands.command(name="testing")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def testing(self, interaction: discord.Interaction):
+        
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'UPDATE users SET rob_cooldown = ? WHERE id = ?', (0, interaction.user.id))
+            
+        connection.commit()
+        connection.close()
+        
+        await interaction.response.send_message("Cleared!", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Utils(bot))

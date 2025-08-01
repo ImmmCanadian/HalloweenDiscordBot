@@ -9,10 +9,46 @@ class AdminCommands(commands.Cog):
     
     @app_commands.command(name="give-candy", description="Gives a user candy.")
     @app_commands.checks.has_permissions(administrator=True)
-    async def givecandy(self, interaction: discord.Interaction , recipient: discord.Member, amount: int):
-        await interaction.response.send_message(f"Placeholder")
+    async def givecandy(self, interaction: discord.Interaction , target: discord.Member, amount: int):
 
+        target_id = target.id
+        target_name = target.name
+
+        utils_cog = self.bot.get_cog("Utils")
+
+        await utils_cog.check_user_exists(target_id, target_name)
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (amount, target.id))
+            
+        connection.commit()
+        connection.close()
+
+        await interaction.response.send_message(f"You gave {amount} candy to {target.name}!")
     
+    @app_commands.command(name="remove-candy", description="Take a users candy.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def removecandy(self, interaction: discord.Interaction , target: discord.Member, amount: int):
+
+        target_id = target.id
+        target_name = target.name
+
+        utils_cog = self.bot.get_cog("Utils")
+
+        await utils_cog.check_user_exists(target_id, target_name)
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (amount, target.id))
+            
+        connection.commit()
+        connection.close()
+
+        await interaction.response.send_message(f"You took {amount} candy from {target.name}!")
+
 
     @commands.command(name="clear_commands")
     @commands.is_owner()

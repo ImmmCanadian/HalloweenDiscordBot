@@ -1,4 +1,4 @@
-import discord, os, logging, asyncio, random
+import discord, os, logging
 #from user_commands import UserCommands
 from discord.ext import commands
 from discord import app_commands
@@ -84,9 +84,6 @@ class Client(commands.Bot):
            print(f"[Slash Command] /{cmd.name} - {cmd.description}")
         await self.tree.sync()
         print("Synced new commands to guild.")
-
-        for cmd in self.tree.walk_commands():
-            print(f"[Slash Command] /{cmd.name} - {cmd.description}")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")

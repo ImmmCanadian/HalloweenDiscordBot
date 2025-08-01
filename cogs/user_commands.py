@@ -6,62 +6,150 @@ import sqlite3
 class UserCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    @app_commands.command(name="daily-candy", description="Claim your daily candy!")
-    async def dailycandy(self, interaction: discord.Interaction):
+    
+    async def candy_cooldown(self, interaction):
+        user_id = interaction.user.id
+        user_name = interaction.user.name
 
         utils_cog = self.bot.get_cog("Utils")
 
-        await utils_cog.check_user_exists(interaction)
+        await utils_cog.check_user_exists(user_id, user_name)
 
-        on_cooldown, time_left, cooldown_name, time = await utils_cog.check_cooldown(interaction)
+        cooldown_data = await utils_cog.check_cooldown(interaction)
+        cooldown_name = cooldown_data['cooldown_name']
+        executed_time = cooldown_data['executed_time']
+        user_time_left = cooldown_data['user_time_left']
 
-        if not on_cooldown:
+        if not cooldown_data['user_on_cooldown']:
 
-            reward = random.randint(100,200)
+            if cooldown_name == "daily_cooldown":
+                reward = random.randint(1000, 2000)
+            else:
+                reward = random.randint(100, 200)
 
             connection = sqlite3.connect('./database.db')
             cursor = connection.cursor()
-            cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (reward, time, interaction.user.id))
+            cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (reward, executed_time, user_id))
             connection.commit()
             connection.close()
 
-            await interaction.response.send_message(f"You won {reward} candy!")
+            await interaction.response.send_message(f"You got {reward} candy!")
         
         else:
-            await interaction.response.send_message(f"This command is still on cooldown for another {time_left} seconds.")
+            await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours.")
+
+    @app_commands.command(name="daily-candy", description="Claim your daily candy!")
+    async def dailycandy(self, interaction: discord.Interaction):
+        await self.candy_cooldown(interaction)
+    
+    @app_commands.command(name="hourly-candy", description="Claim your hourly candy!")
+    async def hourlycandy(self, interaction: discord.Interaction):
+        await self.candy_cooldown(interaction)
+
+    @app_commands.command(name="send-candy", description="Send candy to someone.")
+    async def sendycandy(self, interaction: discord.Interaction, target: discord.Member, amount: int):
+
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+        target_id = target.id
+        target_name = target.name
+
+        utils_cog = self.bot.get_cog("Utils")
+
+        await utils_cog.check_user_exists(user_id, user_name)
+        await utils_cog.check_user_exists(target_id, target_name)
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
+        user_candy_amount = cursor.fetchone()
+        user_candy_amount= user_candy_amount[0]
+
+        if user_candy_amount >= amount:
+            cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (amount, user_id))
+            cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (amount, target_id))
+            await interaction.response.send_message(f"You gave {amount} candy to {target.name}!")
+        
+        connection.commit()
+        connection.close()
+
+        if user_candy_amount < amount:
+            await interaction.response.send_message(f"You dont have enough candy to do that.")
+
+    @app_commands.command(name="balance", description="Check your candy balance.")
+    async def balance(self, interaction: discord.Interaction):
+
+        user_id = interaction.user.id
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+        user_candy_amount = cursor.fetchone()
+        
+        connection.commit()
+        connection.close()
+
+        user_candy_amount= user_candy_amount[0]
+
+        await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy.")
 
     @app_commands.command(name="rob", description="Steal someones candy!")
     async def rob(self, interaction: discord.Interaction, target: discord.Member):
 
-        if interaction.user.id == target.id:
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+        target_id = target.id
+        target_name = target.name
+        
+        if user_id == target_id:
             await interaction.response.send_message(f"You can't rob yourself goofy.")
             return
 
         utils_cog = self.bot.get_cog("Utils")
 
-        await utils_cog.check_user_exists(interaction)
+        await utils_cog.check_user_exists(user_id, user_name)
+        await utils_cog.check_user_exists(target_id, target_name)
 
-        on_cooldown, time_left, cooldown_name, time = await utils_cog.check_cooldown(interaction)
+        cooldown_data = await utils_cog.check_cooldown(interaction, target)
+        cooldown_name = cooldown_data['cooldown_name']
+        executed_time = cooldown_data['executed_time']
+        target_time_left = cooldown_data['target_time_left']
+        user_time_left = cooldown_data['user_time_left']
         
-        if not on_cooldown:
-
-            steal = random.randint(100,200)
+        if not cooldown_data['user_on_cooldown'] and not cooldown_data['target_on_cooldown']:
 
             connection = sqlite3.connect('./database.db')
             cursor = connection.cursor()
-            cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, time, interaction.user.id))
+
+            cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
+            db_result = cursor.fetchone()
+            db_result= db_result[0]
+
+            #Edge case: If user has no candy or has less than the max steal amount
+            if db_result == 0:
+                await interaction.response.send_message(f"You tried to steal candy {target.name}, but they had nothing to steal! Unlucky.")
+                return
+            elif db_result < 200:
+                steal = random.randint(0, db_result)
+            else:
+                steal = random.randint(0, 200)
+
+            cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
             if cooldown_name == "rob_cooldown":
-                cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, time, target.id))
+                cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
             connection.commit()
             connection.close()
 
             await interaction.response.send_message(f"You stole {steal} candy from {target.name}!")
         
-        elif time_left < 0: #This would mean that it isnt on cooldown for the user but the target cant be robbed
-            await interaction.response.send_message(f"This user can't be robbed right now.")
+        elif not cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed
+            await interaction.response.send_message(f"This user can't be robbed for another {utils_cog.convert_seconds_to_string(target_time_left)} hours.")
+        elif cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed and user on cooldown
+            await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours and the user can't be robbed for {utils_cog.convert_seconds_to_string(target_time_left)} seconds.")
         else:
-            await interaction.response.send_message(f"This command is still on cooldown for another {time_left} seconds.")
+            await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} seconds.")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(UserCommands(bot))
