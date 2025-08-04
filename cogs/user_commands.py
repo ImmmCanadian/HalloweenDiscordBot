@@ -34,7 +34,6 @@ class UserCommands(commands.Cog):
             connection.close()
 
             await interaction.response.send_message(f"You got {reward} candy!")
-        
         else:
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours.")
 
@@ -95,6 +94,56 @@ class UserCommands(commands.Cog):
 
         await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy.")
 
+    @app_commands.command(name="cooldowns", description="Check all of your cooldowns.")
+    async def balance(self, interaction: discord.Interaction):
+
+        user_id = interaction.user.id
+        user = interaction.user
+
+        utils_cog = self.bot.get_cog("Utils")
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+        user_candy_amount = cursor.fetchone()
+        cursor.execute(f'SELECT rob_cooldown FROM Users WHERE id = ?', (user_id,))
+        rob_cooldown = cursor.fetchone()
+        cursor.execute(f'SELECT robbed_cooldown FROM Users WHERE id = ?', (user_id,))
+        robbed_cooldown = cursor.fetchone()
+        cursor.execute(f'SELECT daily_cooldown FROM Users WHERE id = ?', (user_id,))
+        daily_cooldown = cursor.fetchone()
+        cursor.execute(f'SELECT hourly_cooldown FROM Users WHERE id = ?', (user_id,))
+        hourly_cooldown = cursor.fetchone()
+        
+        connection.commit()
+        connection.close()
+
+        user_candy_amount= user_candy_amount[0]
+        rob_cooldown= rob_cooldown[0]
+        robbed_cooldown= robbed_cooldown[0]
+        daily_cooldown= daily_cooldown[0]
+        hourly_cooldown= hourly_cooldown[0]
+
+        hourly_name= "hourly_cooldown"
+        daily_name= "daily_cooldown"
+        rob_name= "rob_cooldown"
+        robbed_name= "rob_cooldown"
+        
+        cooldown_embed = discord.Embed(title=f"Command Cooldowns", color=0x9B59B6)
+        cooldown_embed.set_author(
+            name=f"{user.name}",
+            icon_url=user.display_avatar.url)
+        cooldown_embed.add_field(name="Candy Balance",value=f"{user_candy_amount}\n")
+        cooldown_embed.add_field(name="Hourly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(hourly_name, hourly_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="Daily Cooldown",value=f"{utils_cog.convert_cooldown_into_time(daily_name, daily_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="Rob Cooldown",value=f"{utils_cog.convert_cooldown_into_time(rob_name, rob_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="Robbed Cooldown",value=f"{utils_cog.convert_cooldown_into_time(robbed_name, robbed_cooldown)}",inline=False)
+
+        cooldown_embed.set_field_at(index=1,name="test test", value= "test test", inline=False)
+
+        await interaction.response.send_message(embed=cooldown_embed)
+
     @app_commands.command(name="rob", description="Steal someones candy!")
     async def rob(self, interaction: discord.Interaction, target: discord.Member):
 
@@ -137,8 +186,7 @@ class UserCommands(commands.Cog):
                 steal = random.randint(0, 200)
 
             cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
-            if cooldown_name == "rob_cooldown":
-                cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
+            cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
             connection.commit()
             connection.close()
 

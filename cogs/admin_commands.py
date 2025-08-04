@@ -49,7 +49,6 @@ class AdminCommands(commands.Cog):
 
         await interaction.response.send_message(f"You took {amount} candy from {target.name}!")
 
-
     @commands.command(name="clear_commands")
     @commands.is_owner()
     async def clear_commands(self, ctx: commands.Context):

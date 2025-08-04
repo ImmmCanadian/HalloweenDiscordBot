@@ -6,6 +6,18 @@ import sqlite3
 
 class Utils(commands.Cog):
 
+    name_reference = {
+            'daily-candy': "daily_cooldown",
+            'hourly-candy': "hourly_cooldown",
+            'rob': "rob_cooldown"
+        }
+
+    time_reference = {
+            'daily_cooldown': 86400,
+            'hourly_cooldown': 3600,
+            'rob_cooldown': 3600
+        }
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -46,23 +58,11 @@ class Utils(commands.Cog):
             'executed_time': 0
         }
 
-        name_reference = {
-            'daily-candy': "daily_cooldown",
-            'hourly-candy': "hourly_cooldown",
-            'rob': "rob_cooldown"
-        }
-
-        time_reference = {
-            'daily_cooldown': 86400,
-            'hourly_cooldown': 3600,
-            'rob_cooldown': 3600
-        }
-
         command_name = interaction.command.name
         user_id = interaction.user.id
 
-        cooldown_name = name_reference[command_name]
-        cooldown_time = time_reference[cooldown_name]
+        cooldown_name = self.name_reference[command_name]
+        cooldown_time = self.time_reference[cooldown_name]
 
         connection = sqlite3.connect('./database.db')
         cursor = connection.cursor()
@@ -94,10 +94,17 @@ class Utils(commands.Cog):
         if target == None:
             return data
 
-        data['target_on_cooldown'] = target_result + time_reference['rob_cooldown'] >= current_time
-        data['target_time_left'] = current_time - (target_result + time_reference['rob_cooldown'])
+        data['target_on_cooldown'] = target_result + self.time_reference['rob_cooldown'] >= current_time
+        data['target_time_left'] = current_time - (target_result + self.time_reference['rob_cooldown'])
             
         return data
+    
+    def convert_cooldown_into_time(self, cooldown_name, cooldown_exec_time):
+        value = time.time() - (self.time_reference[cooldown_name] + cooldown_exec_time)
+        if value < 0:
+            return f"Next reset is in {self.convert_seconds_to_string(value)}."
+        else:
+            return "This command is ready!"
 
     def convert_seconds_to_string(self, time_left):
         time_left = abs(int(time_left)) 

@@ -56,8 +56,7 @@ async def load_database():
         # Create Store tables if doesnt exist
         create_store_table_query = '''
         CREATE TABLE IF NOT EXISTS Store (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
+            name TEXT DEFAULT 0 PRIMARY KEY,
             role INTEGER DEFAULT 0,
             quantity TEXT DEFAULT 0
         );
