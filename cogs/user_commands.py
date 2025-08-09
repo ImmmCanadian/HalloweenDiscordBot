@@ -68,7 +68,7 @@ class UserCommands(commands.Cog):
         if user_candy_amount >= amount:
             cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (amount, user_id))
             cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (amount, target_id))
-            await interaction.response.send_message(f"You gave {amount} candy to {target.name}!")
+            await interaction.response.send_message(f"You gave {amount} candy to {target.mention}!")
         
         connection.commit()
         connection.close()
@@ -80,6 +80,10 @@ class UserCommands(commands.Cog):
     async def balance(self, interaction: discord.Interaction):
 
         user_id = interaction.user.id
+        user_name = interaction.user.name
+
+        utils_cog = self.bot.get_cog("Utils")
+        await utils_cog.check_user_exists(user_id, user_name)
 
         connection = sqlite3.connect('./database.db')
         cursor = connection.cursor()
@@ -95,12 +99,15 @@ class UserCommands(commands.Cog):
         await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy.")
 
     @app_commands.command(name="cooldowns", description="Check all of your cooldowns.")
-    async def balance(self, interaction: discord.Interaction):
+    async def cooldowns(self, interaction: discord.Interaction):
 
         user_id = interaction.user.id
+        user_name = interaction.user.name
         user = interaction.user
 
         utils_cog = self.bot.get_cog("Utils")
+
+        await utils_cog.check_user_exists(user_id, user_name)
 
         connection = sqlite3.connect('./database.db')
         cursor = connection.cursor()
@@ -134,6 +141,7 @@ class UserCommands(commands.Cog):
         cooldown_embed.set_author(
             name=f"{user.name}",
             icon_url=user.display_avatar.url)
+            
         cooldown_embed.add_field(name="Candy Balance",value=f"{user_candy_amount}\n")
         cooldown_embed.add_field(name="Hourly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(hourly_name, hourly_cooldown)}\n",inline=False)
         cooldown_embed.add_field(name="Daily Cooldown",value=f"{utils_cog.convert_cooldown_into_time(daily_name, daily_cooldown)}\n",inline=False)
@@ -143,6 +151,33 @@ class UserCommands(commands.Cog):
         cooldown_embed.set_field_at(index=1,name="test test", value= "test test", inline=False)
 
         await interaction.response.send_message(embed=cooldown_embed)
+
+    @app_commands.command(name="help", description="Check what all of your commands do.")
+    async def help(self, interaction: discord.Interaction):
+
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+        user = interaction.user
+
+        utils_cog = self.bot.get_cog("Utils")
+        await utils_cog.check_user_exists(user_id, user_name)
+
+        embed = discord.Embed(title=f"Help!", description="These are all of the available user commands! If a command throws an error, make sure to read what should be entered into the field (ex. when purchasing item_name is case sensitive)", color=0x9B59B6)
+        embed.set_author(
+            name=f"{user.name}",
+            
+            icon_url=user.display_avatar.url)
+
+        embed.add_field(name="Balance",value=f"Shows you your total candy balance.\n")
+        embed.add_field(name="Send Candy",value=f"Lets you send candy to another user",inline=False)
+        embed.add_field(name="Hourly Candy",value=f"Claim 100-200 candy every single hour!\n",inline=False)
+        embed.add_field(name="Daily Candy",value=f"Claim a larger daily candy reward.\n",inline=False)
+        embed.add_field(name="Rob",value=f"Lets you rob another user. Be warned, you can also be robbed!\n",inline=False)
+        embed.add_field(name="Cooldowns",value=f"Shows you the time left for every command and when you can be robbed next.",inline=False)
+        embed.add_field(name="Store",value=f"Shows you all of the available items in the candy store/",inline=False)
+        embed.add_field(name="Purchase",value=f"Buy an item from the store! Name is case sensitive.",inline=False)
+
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="rob", description="Steal someones candy!")
     async def rob(self, interaction: discord.Interaction, target: discord.Member):
@@ -190,7 +225,7 @@ class UserCommands(commands.Cog):
             connection.commit()
             connection.close()
 
-            await interaction.response.send_message(f"You stole {steal} candy from {target.name}!")
+            await interaction.response.send_message(f"{interaction.user.mention} stole {steal} candy from {target.mention}!")
         
         elif not cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed
             await interaction.response.send_message(f"This user can't be robbed for another {utils_cog.convert_seconds_to_string(target_time_left)} hours.")

@@ -3,16 +3,32 @@ from discord.ext import commands
 from discord import app_commands
 import sqlite3
 
+ITEMS_PER_PAGE = 5
+
 class Store(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
     @app_commands.command(name="add-store-item", description="Add an item to the store or add more quantity.")
     @app_commands.checks.has_permissions(administrator=True)
-    async def removecandy(self, interaction: discord.Interaction , item_name: str, quantity: int, role: int):
+    @app_commands.describe(role="Either put the role name without the @ (Ex. Crackhead) or put None (Not a role)")
+    async def add_store_item(self, interaction: discord.Interaction , item_name: str, quantity: int, role: str, price: int):
 
-        if role < 0 or role > 1:
-            await interaction.response.send_message("Role should be 0 for not a role and 1 for a role")
+        role_id = 0
+
+        if role != "None":
+            role_id = discord.utils.find(lambda r: r.name.lower() == role.lower(), interaction.guild.roles)
+            if role_id is None:
+                await interaction.response.send_message("This role doesn't exist in the server. Please create the role before trying to add it to the store.", ephemeral=True)
+                return
+            role_id = role_id.id
+
+        if quantity <= 0:
+            await interaction.response.send_message("Quantity must be greater than zero.", ephemeral=True)
+            return
+
+        if price < 0:
+            await interaction.response.send_message("Price can not be negative.", ephemeral=True)
             return
 
         connection = sqlite3.connect('./database.db')
@@ -23,29 +39,37 @@ class Store(commands.Cog):
         result = cursor.fetchone()
 
         if result is None:
-            cursor.execute('INSERT INTO Store (name, role, quantity) VALUES (?, ?, ?)',
-                        (item_name, role, quantity))
+            cursor.execute('INSERT INTO Store (name, role, quantity, role_id, price) VALUES (?, ?, ?, ?, ?)',
+                        (item_name, role, quantity, role_id, price))
         else:
             cursor.execute(f'UPDATE Store SET quantity = quantity + ? WHERE name = ?', (quantity, item_name))
             
         connection.commit()
         connection.close()
 
-        await interaction.response.send_message(f"Item added successfully.")
+        await interaction.response.send_message(f"Item added successfully.", ephemeral=True)
 
     @app_commands.command(name="remove-store-item", description="Remove an item to the store or reduce the quantity (0 quantity removes it).")
     @app_commands.checks.has_permissions(administrator=True)
-    async def removecandy(self, interaction: discord.Interaction , item_name: str, quantity: int):
+    async def remove_store_item(self, interaction: discord.Interaction , item_name: str, quantity: int):
 
         connection = sqlite3.connect('./database.db')
         cursor = connection.cursor()
+
+        #Returns None if item does not exist in our DB
+        cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+        result = cursor.fetchone()
+
+        if result is None:
+            await interaction.response.send_message("Item does not exist in our database.", ephemeral=True)
+            return
 
         #Returns our items quantity
         cursor.execute('SELECT quantity FROM Store WHERE name = ?', (item_name,))
         result = cursor.fetchone()
         result = result[0]
 
-        if result - quantity <= 0:
+        if int(result) - quantity <= 0:
             cursor.execute(f'DELETE FROM Store WHERE name = ?', (item_name,))
         else:
             cursor.execute(f'UPDATE Store SET quantity = quantity - ? WHERE name = ?', (quantity, item_name))
@@ -53,7 +77,148 @@ class Store(commands.Cog):
         connection.commit()
         connection.close()
 
-        await interaction.response.send_message(f"Item removed successfully.")       
+        await interaction.response.send_message(f"Item removed successfully.", ephemeral=True)
+    
+    @app_commands.command(name="purchase", description="Purchase an item from the store")
+    @app_commands.describe(item_name="Case sensitive, enter the exact item name")
+    async def purchase(self, interaction: discord.Interaction, item_name: str, quantity: int):
+
+        if quantity == 0:
+            await interaction.response.send_message(f"This brokie {interaction.user.name} just tried to buy 0 quantity of an item.", ephemeral = False)
+            return
+
+
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+
+        utils_cog = self.bot.get_cog("Utils")
+
+        await utils_cog.check_user_exists(user_id, user_name)
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        #Returns None if item does not exist in our DB
+        cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+        result = cursor.fetchone()
+
+        if result is None:
+            await interaction.response.send_message("This item doesn't exist.", ephemeral = False)
+            connection.close()
+            return
+        
+        price = int(result[4])
+        stock = int(result[2])
+        role_id = int(result[3])
+
+        #Check if user trying to purchase more than 1 of a role or user already has the role
+        if (quantity > 1 and role_id > 0) or interaction.user.get_role(role_id) != None: 
+            await interaction.response.send_message("You can only buy a max of 1 for a role!", ephemeral = True)
+            connection.close()
+            return
+
+        cursor.execute('SELECT candy FROM Users WHERE id = ?', (user_id,))
+        user_candy_amount = cursor.fetchone()
+        user_candy_amount = user_candy_amount[0]
+
+        if user_candy_amount < price:
+            await interaction.response.send_message(f"{interaction.user.mention} is a brokie and can't afford his item 🤡!", ephemeral = False)
+            connection.close()
+            return
+        
+        if stock <= 0:
+            await interaction.response.send_message("This item is out of stock!", ephemeral = True)
+            connection.close()
+            return
+        
+        if role_id > 0: #If the item we are trying to buy is a role
+            await interaction.user.add_roles(interaction.guild.get_role(role_id))
+            cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (price, user_id))
+            cursor.execute(f'UPDATE store SET quantity = quantity - 1 WHERE name = ?', (item_name, ))
+            connection.commit()
+            connection.close()
+            await interaction.response.send_message("You have bought and gotten your role!", ephemeral=False)
+
+
+    def get_total_items(self):
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM Store")
+        total_items = cursor.fetchone()[0]
+        connection.commit()
+        connection.close()
+        return total_items
+
+    def get_page_items(self, page):
+        offset = page * ITEMS_PER_PAGE
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+        cursor.execute("SELECT name, quantity, price FROM Store LIMIT ? OFFSET ?", (ITEMS_PER_PAGE, offset))
+        data = cursor.fetchall()
+        connection.commit()
+        connection.close()
+        return data
+
+    @app_commands.command(name="store", description="Browse the item store")
+    async def store(self, interaction: discord.Interaction):
+        view = self.StoreView(self, interaction.user)
+        embed = view.generate_embed()
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+
+    class StoreView(discord.ui.View):
+        def __init__(self, cog, user, page=0):
+            super().__init__(timeout=180)
+            self.cog = cog
+            self.user = user
+            self.page = page
+            self.total_items = self.cog.get_total_items()
+            self.max_page = (self.total_items - 1) // ITEMS_PER_PAGE
+            self.update_buttons()
+
+        def generate_embed(self):
+            items = self.cog.get_page_items(self.page)
+            header = "Name           Quantity    Price\n"
+            store_lines = []
+            for name, quantity, price in items:
+                trimmed_name = (name[:14 - 3] + "...") if len(name) > 12 else name
+                padded_name = f"{trimmed_name:<15}" 
+                store_lines.append(f"{padded_name} {str(quantity):<10} {str(price)}")
+                store_lines.append("")
+            embed = discord.Embed(
+                title=f"🍬 Aches Candy Store 🍬\n",
+                description="\u200b\n" + "```"+"\n".join([header] + store_lines)+"```"+"\u200b\n",
+                color=discord.Color.purple()
+            )
+            embed.set_author(name=f"{self.user.name}'s Store", icon_url=self.user.display_avatar.url)
+            embed.set_footer(text=f"Page {self.page + 1}")
+            embed.set_thumbnail(url="https://images.halloweencostumes.com.au/products/12290/1-1/light-up-traditional-pumpkin-upd.jpg")
+            return embed
+
+        def update_buttons(self):
+            self.previous.disabled = self.page <= 0
+            self.next.disabled = self.page >= self.max_page
+
+        @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("Use your own store buster.", ephemeral=True)
+                return
+
+            if self.page > 0: #Technically dont need this since should be disabled
+                self.page -= 1
+                self.update_buttons()
+                await interaction.response.edit_message(embed=self.generate_embed(), view=self)
+
+        @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("Use your own store buster.", ephemeral=True)
+                return
+
+            if self.page < self.max_page: #Technically dont need this since should be disabled
+                self.page += 1
+                self.update_buttons()
+                await interaction.response.edit_message(embed=self.generate_embed(), view=self)    
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Store(bot))

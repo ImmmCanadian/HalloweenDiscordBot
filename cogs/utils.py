@@ -113,16 +113,6 @@ class Utils(commands.Cog):
         seconds = time_left % 60
         return f"{hours:02}:{minutes:02}:{seconds:02}" 
 
-    @app_commands.command(name="sync")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def sync_commands(self, interaction: discord.Interaction):
-        
-        for cmd in self.bot.tree.walk_commands():
-            print(f"[Slash Command] /{cmd.name} - {cmd.description}")
-        
-        await self.bot.tree.sync()
-        await interaction.response.send_message("Commands synced!", ephemeral=True)
-
     @app_commands.command(name="testing")
     @app_commands.checks.has_permissions(administrator=True)
     async def testing(self, interaction: discord.Interaction):
@@ -135,7 +125,7 @@ class Utils(commands.Cog):
         connection.commit()
         connection.close()
         
-        await interaction.response.send_message("Cleared!", ephemeral=True)
+        await interaction.response.send_message("This is after sync!", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Utils(bot))
