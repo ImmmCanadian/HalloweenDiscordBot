@@ -1,6 +1,6 @@
 import discord, random, asyncio
 from discord.ext import commands
-from discord import app_commands
+from discord import app_commands, File
 from discord.ui import Button, View
 import sqlite3
 
@@ -10,8 +10,8 @@ RPS_SYMBOLS={"rock": "🪨",
         "scissors":"✂️",
         "question_mark":"❓"}
 
-COIN_TOSS_CHOICES = []
-COIN_SYMBOLS = []
+COIN_TOSS_CHOICES = ["heads","tails","side"]
+COIN_WEIGHTS = [0.45,0.45,0.1]
 
 class Gamble(commands.Cog):
     def __init__(self, bot):
@@ -22,28 +22,10 @@ class Gamble(commands.Cog):
 
         winnings = 0
         won = False
-
-        if bet <= 0:
-            await interaction.response.send_message("Earn some candy before you try to gamble...", ephemeral=False)
-            return
-
         user_id = interaction.user.id
         user_name = interaction.user.name
 
-        utils_cog = self.bot.get_cog("Utils")
-        await utils_cog.check_user_exists(user_id, user_name)
-
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
-
-        cursor.execute(f'SELECT candy FROM users WHERE id = ?', (user_id,))
-        user_candy_amount = cursor.fetchone()[0]
-            
-        connection.commit()
-        connection.close()
-
-        if user_candy_amount < bet:
-            await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=True)
+        if await self.check_user_bet(interaction, bet, user_id, user_name):
             return
         
         embed = discord.Embed(title=f"Rock Paper Scissors!", description=f"You: {RPS_SYMBOLS['question_mark']}      Bot: {RPS_SYMBOLS['question_mark']}.", color=0x9B59B6)
@@ -128,45 +110,30 @@ class Gamble(commands.Cog):
 
         winnings = 0
         won = False
-
-        if bet <= 0:
-            await interaction.response.send_message("Earn some candy before you try to gamble...", ephemeral=False)
-            return
-
         user_id = interaction.user.id
         user_name = interaction.user.name
-
-        utils_cog = self.bot.get_cog("Utils")
-        await utils_cog.check_user_exists(user_id, user_name)
-
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
-
-        cursor.execute(f'SELECT candy FROM users WHERE id = ?', (user_id,))
-        user_candy_amount = cursor.fetchone()[0]
-            
-        connection.commit()
-        connection.close()
-
-        if user_candy_amount < bet:
-            await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=True)
-            return
         
-        embed = discord.Embed(title=f"Rock Paper Scissors!", description=f"You: {SYMBOLS['question_mark']}      Bot: {SYMBOLS['question_mark']}.", color=0x9B59B6)
+        if await self.check_user_bet(interaction, bet, user_id, user_name):
+            return
+         
+        embed = discord.Embed(title=f"Coin toss!", description=f"Make your choice!.", color=0x9B59B6)
         embed.set_author(
             name=f"{user_name}",
             icon_url=interaction.user.display_avatar.url)
 
         buttons = View()
-        rock_button = Button(label="🪨 Rock", style=discord.ButtonStyle.danger, custom_id="rock")
-        paper_button = Button(label="📄 Paper", style=discord.ButtonStyle.danger, custom_id="paper")
-        scissors_button = Button(label="✂️ Scissors", style=discord.ButtonStyle.danger, custom_id="scissors")
+        heads_button = Button(label="Heads", style=discord.ButtonStyle.danger, custom_id="heads")
+        tails_button = Button(label="Tails", style=discord.ButtonStyle.danger, custom_id="tails")
+        side_button = Button(label="Side", style=discord.ButtonStyle.danger, custom_id="side")
 
-        buttons.add_item(rock_button)
-        buttons.add_item(paper_button)
-        buttons.add_item(scissors_button)
+        buttons.add_item(heads_button)
+        buttons.add_item(tails_button)
+        buttons.add_item(side_button)
+        
+        embed.set_image(url=f"attachment://start.png")
+        gif_file = File(f"images/start.png", filename=f"start.png")
 
-        await interaction.response.send_message(embed=embed,view=buttons, ephemeral=False)
+        await interaction.response.send_message(embed=embed,view=buttons, file=gif_file, ephemeral=False)
 
         message = await interaction.original_response()
 
@@ -180,18 +147,30 @@ class Gamble(commands.Cog):
             print(f"Interaction failed with error: {e}")
             return
         
-        bot_pick = random.choice(RPS_BOT_CHOICES)
-        embed.description= (f"You: {RPS_SYMBOLS[inter.data['custom_id']]}      Bot: {RPS_SYMBOLS[bot_pick]}.")
-
-        #Player Wins
-        if inter.data['custom_id'] == bot_pick:
+        bot_pick = random.choices(COIN_TOSS_CHOICES, weights=COIN_WEIGHTS, k=1)[0]
+        embed.description= (f"Flipping.")
+        
+        
+        buttons.clear_items()
+        
+        embed.set_image(url=f"attachment://{bot_pick}.gif")
+        gif_file = File(f"images/{bot_pick}.gif", filename=f"{bot_pick}.gif")
+        await message.edit(embed=embed,view=buttons, attachments=[gif_file])
+        
+        await asyncio.sleep(3.9 if bot_pick != "side" else 2.7)
+        
+        embed.set_image(url=f"attachment://end-{bot_pick}.webp")
+        gif_file = File(f"images/end-{bot_pick}.webp", filename=f"end-{bot_pick}.webp")
+        await message.edit(embed=embed,view=buttons, attachments=[gif_file])
+            
+        #Player Wins, Dont need to check losing conditions
+        if inter.data['custom_id'] == bot_pick and inter.data['custom_id'] == "side":
+            winnings = bet * 9
+            won=True
+        elif inter.data['custom_id'] == bot_pick:
             winnings = bet * 2
-            embed.set_footer(text = f"You won {winnings} candy!")
-            await message.edit(embed=embed, view=buttons)
-
-        #Player losing conditions
-        else:
-            pass
+            won=True
+        
 
         connection = sqlite3.connect('./database.db')
         cursor = connection.cursor()
@@ -201,16 +180,39 @@ class Gamble(commands.Cog):
             
         connection.commit()
         connection.close()
-
-        buttons.clear_items()
+        
+        embed.description= (f"Results:")
         
         if won:
-            embed.set_footer(text= f"You won! You won a total of {winnings}!")
+            embed.set_footer(text = f"You won {winnings} candy!")
         else:
-            embed.set_footer(text= "You lost! Better luck next time!")
-            
+            embed.set_footer(text = f"You lost. Better luck next time!")
+               
         await message.edit(embed=embed, view=buttons)
-    
+        
+    async def check_user_bet(self, interaction, bet, user_id, user_name):
+        
+        if bet <= 0:
+            await interaction.response.send_message("Earn some candy before you try to gamble...", ephemeral=False)
+            return True
+        
+        utils_cog = self.bot.get_cog("Utils")
+        await utils_cog.check_user_exists(user_id, user_name)
+
+        connection = sqlite3.connect('./database.db')
+        cursor = connection.cursor()
+
+        cursor.execute(f'SELECT candy FROM users WHERE id = ?', (user_id,))
+        user_candy_amount = cursor.fetchone()[0]
+            
+        connection.commit()
+        connection.close()
+
+        if user_candy_amount < bet:
+            await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=False)
+            return True
+        
+        return False
 
 
 async def setup(bot: commands.Bot):
