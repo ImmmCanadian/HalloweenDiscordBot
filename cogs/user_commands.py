@@ -1,7 +1,6 @@
-import discord, random
+import discord, random, asqlite
 from discord.ext import commands
 from discord import app_commands
-import sqlite3
 
 class UserCommands(commands.Cog):
     def __init__(self, bot):
@@ -27,11 +26,10 @@ class UserCommands(commands.Cog):
             else:
                 reward = random.randint(100, 200)
 
-            connection = sqlite3.connect('./database.db')
-            cursor = connection.cursor()
-            cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (reward, executed_time, user_id))
-            connection.commit()
-            connection.close()
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (reward, executed_time, user_id))
+                    await connection.commit()
 
             await interaction.response.send_message(f"You got {reward} candy!")
         else:
@@ -58,20 +56,19 @@ class UserCommands(commands.Cog):
         await utils_cog.check_user_exists(user_id, user_name)
         await utils_cog.check_user_exists(target_id, target_name)
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
-        user_candy_amount = cursor.fetchone()
-        user_candy_amount= user_candy_amount[0]
+                await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
+                user_candy_amount = await cursor.fetchone()
+                user_candy_amount= user_candy_amount[0]
 
-        if user_candy_amount >= amount:
-            cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (amount, user_id))
-            cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (amount, target_id))
-            await interaction.response.send_message(f"You gave {amount} candy to {target.mention}!")
-        
-        connection.commit()
-        connection.close()
+                if user_candy_amount >= amount:
+                    await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (amount, user_id))
+                    await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (amount, target_id))
+                    await interaction.response.send_message(f"You gave {amount} candy to {target.mention}!")
+                
+                await connection.commit()
 
         if user_candy_amount < amount:
             await interaction.response.send_message(f"You dont have enough candy to do that.")
@@ -85,14 +82,13 @@ class UserCommands(commands.Cog):
         utils_cog = self.bot.get_cog("Utils")
         await utils_cog.check_user_exists(user_id, user_name)
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
-        user_candy_amount = cursor.fetchone()
-        
-        connection.commit()
-        connection.close()
+                await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+                user_candy_amount = await cursor.fetchone()
+                
+                await connection.commit()
 
         user_candy_amount= user_candy_amount[0]
 
@@ -109,22 +105,21 @@ class UserCommands(commands.Cog):
 
         await utils_cog.check_user_exists(user_id, user_name)
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
-        user_candy_amount = cursor.fetchone()
-        cursor.execute(f'SELECT rob_cooldown FROM Users WHERE id = ?', (user_id,))
-        rob_cooldown = cursor.fetchone()
-        cursor.execute(f'SELECT robbed_cooldown FROM Users WHERE id = ?', (user_id,))
-        robbed_cooldown = cursor.fetchone()
-        cursor.execute(f'SELECT daily_cooldown FROM Users WHERE id = ?', (user_id,))
-        daily_cooldown = cursor.fetchone()
-        cursor.execute(f'SELECT hourly_cooldown FROM Users WHERE id = ?', (user_id,))
-        hourly_cooldown = cursor.fetchone()
-        
-        connection.commit()
-        connection.close()
+                await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+                user_candy_amount = await cursor.fetchone()
+                await cursor.execute(f'SELECT rob_cooldown FROM Users WHERE id = ?', (user_id,))
+                rob_cooldown = await cursor.fetchone()
+                await cursor.execute(f'SELECT robbed_cooldown FROM Users WHERE id = ?', (user_id,))
+                robbed_cooldown = await cursor.fetchone()
+                await cursor.execute(f'SELECT daily_cooldown FROM Users WHERE id = ?', (user_id,))
+                daily_cooldown = await cursor.fetchone()
+                await cursor.execute(f'SELECT hourly_cooldown FROM Users WHERE id = ?', (user_id,))
+                hourly_cooldown = await cursor.fetchone()
+                
+                await connection.commit()
 
         user_candy_amount= user_candy_amount[0]
         rob_cooldown= rob_cooldown[0]
@@ -204,26 +199,25 @@ class UserCommands(commands.Cog):
         
         if not cooldown_data['user_on_cooldown'] and not cooldown_data['target_on_cooldown']:
 
-            connection = sqlite3.connect('./database.db')
-            cursor = connection.cursor()
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
 
-            cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
-            db_result = cursor.fetchone()
-            db_result= db_result[0]
+                    await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
+                    db_result = await cursor.fetchone()
+                    db_result= db_result[0]
 
-            #Edge case: If user has no candy or has less than the max steal amount
-            if db_result == 0:
-                await interaction.response.send_message(f"You tried to steal candy {target.name}, but they had nothing to steal! Unlucky.")
-                return
-            elif db_result < 200:
-                steal = random.randint(0, db_result)
-            else:
-                steal = random.randint(0, 200)
+                    #Edge case: If user has no candy or has less than the max steal amount
+                    if db_result == 0:
+                        await interaction.response.send_message(f"You tried to steal candy {target.name}, but they had nothing to steal! Unlucky.")
+                        return
+                    elif db_result < 200:
+                        steal = random.randint(0, db_result)
+                    else:
+                        steal = random.randint(0, 200)
 
-            cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
-            cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
-            connection.commit()
-            connection.close()
+                    await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
+                    await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
+                    await connection.commit()
 
             await interaction.response.send_message(f"{interaction.user.mention} stole {steal} candy from {target.mention}!")
         
@@ -235,4 +229,5 @@ class UserCommands(commands.Cog):
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} seconds.")
 
 async def setup(bot: commands.Bot):
+    
     await bot.add_cog(UserCommands(bot))

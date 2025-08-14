@@ -1,4 +1,4 @@
-import discord, random
+import discord, asqlite, asyncio
 from discord.ext import commands
 from discord import app_commands
 import sqlite3
@@ -10,7 +10,7 @@ class Store(commands.Cog):
         self.bot = bot
     
     @app_commands.command(name="add-store-item", description="Add an item to the store or add more quantity.")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(role="Either put the role name without the @ (Ex. Crackhead) or put None (Not a role)")
     async def add_store_item(self, interaction: discord.Interaction , item_name: str, quantity: int, role: str, price: int):
 
@@ -31,51 +31,51 @@ class Store(commands.Cog):
             await interaction.response.send_message("Price can not be negative.", ephemeral=True)
             return
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        #Returns None if item does not exist in our DB
-        cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
-        result = cursor.fetchone()
+                #Returns None if item does not exist in our DB
+                await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+                result = await cursor.fetchone()
 
-        if result is None:
-            cursor.execute('INSERT INTO Store (name, role, quantity, role_id, price) VALUES (?, ?, ?, ?, ?)',
-                        (item_name, role, quantity, role_id, price))
-        else:
-            cursor.execute(f'UPDATE Store SET quantity = quantity + ? WHERE name = ?', (quantity, item_name))
-            
-        connection.commit()
-        connection.close()
+                if result is None:
+                    await cursor.execute('INSERT INTO Store (name, role, quantity, role_id, price) VALUES (?, ?, ?, ?, ?)',
+                                (item_name, role, quantity, role_id, price))
+                else:
+                    await cursor.execute(f'UPDATE Store SET quantity = quantity + ? WHERE name = ?', (quantity, item_name))
+                    
+                await connection.commit()
+                
 
         await interaction.response.send_message(f"Item added successfully.", ephemeral=True)
 
     @app_commands.command(name="remove-store-item", description="Remove an item to the store or reduce the quantity (0 quantity removes it).")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.default_permissions(administrator=True)
     async def remove_store_item(self, interaction: discord.Interaction , item_name: str, quantity: int):
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        #Returns None if item does not exist in our DB
-        cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
-        result = cursor.fetchone()
+                #Returns None if item does not exist in our DB
+                await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+                result = await cursor.fetchone()
 
-        if result is None:
-            await interaction.response.send_message("Item does not exist in our database.", ephemeral=True)
-            return
+                if result is None:
+                    await interaction.response.send_message("Item does not exist in our database.", ephemeral=True)
+                    return
 
-        #Returns our items quantity
-        cursor.execute('SELECT quantity FROM Store WHERE name = ?', (item_name,))
-        result = cursor.fetchone()
-        result = result[0]
+                #Returns our items quantity
+                await cursor.execute('SELECT quantity FROM Store WHERE name = ?', (item_name,))
+                result = await cursor.fetchone()
+                result = result[0]
 
-        if int(result) - quantity <= 0:
-            cursor.execute(f'DELETE FROM Store WHERE name = ?', (item_name,))
-        else:
-            cursor.execute(f'UPDATE Store SET quantity = quantity - ? WHERE name = ?', (quantity, item_name))
-            
-        connection.commit()
-        connection.close()
+                if int(result) - quantity <= 0:
+                    await cursor.execute(f'DELETE FROM Store WHERE name = ?', (item_name,))
+                else:
+                    await cursor.execute(f'UPDATE Store SET quantity = quantity - ? WHERE name = ?', (quantity, item_name))
+                    
+                await connection.commit()
+                
 
         await interaction.response.send_message(f"Item removed successfully.", ephemeral=True)
     
@@ -95,74 +95,76 @@ class Store(commands.Cog):
 
         await utils_cog.check_user_exists(user_id, user_name)
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        #Returns None if item does not exist in our DB
-        cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
-        result = cursor.fetchone()
+                #Returns None if item does not exist in our DB
+                await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+                result = await cursor.fetchone()
 
-        if result is None:
-            await interaction.response.send_message("This item doesn't exist.", ephemeral = False)
-            connection.close()
-            return
-        
-        price = int(result[4])
-        stock = int(result[2])
-        role_id = int(result[3])
+                if result is None:
+                    await interaction.response.send_message("This item doesn't exist.", ephemeral = False)
+                    
+                    return
+                
+                price = int(result[4])
+                stock = int(result[2])
+                role_id = int(result[3])
 
-        #Check if user trying to purchase more than 1 of a role or user already has the role
-        if (quantity > 1 and role_id > 0) or interaction.user.get_role(role_id) != None: 
-            await interaction.response.send_message("You can only buy a max of 1 for a role!", ephemeral = True)
-            connection.close()
-            return
+                #Check if user trying to purchase more than 1 of a role or user already has the role
+                if (quantity > 1 and role_id > 0) or interaction.user.get_role(role_id) != None: 
+                    await interaction.response.send_message("You can only buy a max of 1 for a role!", ephemeral = True)
+                    
+                    return
 
-        cursor.execute('SELECT candy FROM Users WHERE id = ?', (user_id,))
-        user_candy_amount = cursor.fetchone()
-        user_candy_amount = user_candy_amount[0]
+                await cursor.execute('SELECT candy FROM Users WHERE id = ?', (user_id,))
+                user_candy_amount = await cursor.fetchone()
+                user_candy_amount = user_candy_amount[0]
 
-        if user_candy_amount < price:
-            await interaction.response.send_message(f"{interaction.user.mention} is a brokie and can't afford his item 🤡!", ephemeral = False)
-            connection.close()
-            return
-        
-        if stock <= 0:
-            await interaction.response.send_message("This item is out of stock!", ephemeral = True)
-            connection.close()
-            return
-        
-        if role_id > 0: #If the item we are trying to buy is a role
-            await interaction.user.add_roles(interaction.guild.get_role(role_id))
-            cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (price, user_id))
-            cursor.execute(f'UPDATE store SET quantity = quantity - 1 WHERE name = ?', (item_name, ))
-            connection.commit()
-            connection.close()
-            await interaction.response.send_message("You have bought and gotten your role!", ephemeral=False)
+                if user_candy_amount < price:
+                    await interaction.response.send_message(f"{interaction.user.mention} is a brokie and can't afford his item 🤡!", ephemeral = False)
+                    
+                    return
+                
+                if stock <= 0:
+                    await interaction.response.send_message("This item is out of stock!", ephemeral = True)
+                    
+                    return
+                
+                if role_id > 0: #If the item we are trying to buy is a role
+                    await interaction.user.add_roles(interaction.guild.get_role(role_id))
+                    await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (price, user_id))
+                    await cursor.execute(f'UPDATE store SET quantity = quantity - 1 WHERE name = ?', (item_name, ))
+                    await connection.commit()
+                    
+                    await interaction.response.send_message("You have bought and gotten your role!", ephemeral=False)
 
 
-    def get_total_items(self):
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
-        cursor.execute("SELECT COUNT(*) FROM Store")
-        total_items = cursor.fetchone()[0]
-        connection.commit()
-        connection.close()
+    async def get_total_items(self):
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM Store")
+                total_items = await cursor.fetchone()
+                total_items = total_items[0]
+                await connection.commit()
+                
         return total_items
 
-    def get_page_items(self, page):
+    async def get_page_items(self, page):
         offset = page * ITEMS_PER_PAGE
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
-        cursor.execute("SELECT name, quantity, price FROM Store LIMIT ? OFFSET ?", (ITEMS_PER_PAGE, offset))
-        data = cursor.fetchall()
-        connection.commit()
-        connection.close()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute("SELECT name, quantity, price FROM Store LIMIT ? OFFSET ?", (ITEMS_PER_PAGE, offset))
+                data = await cursor.fetchall()
+                await connection.commit()
+                
         return data
 
     @app_commands.command(name="store", description="Browse the item store")
     async def store(self, interaction: discord.Interaction):
         view = self.StoreView(self, interaction.user)
-        embed = view.generate_embed()
+        await view.initialize()
+        embed = await view.generate_embed()
         await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
 
     class StoreView(discord.ui.View):
@@ -171,12 +173,16 @@ class Store(commands.Cog):
             self.cog = cog
             self.user = user
             self.page = page
-            self.total_items = self.cog.get_total_items()
-            self.max_page = (self.total_items - 1) // ITEMS_PER_PAGE
+            self.total_items = 0
+            self.max_page = 0
+        
+        async def initialize(self):
+            self.total_items = await self.cog.get_total_items()
+            self.max_page = (self.total_items - 1) // ITEMS_PER_PAGE if self.total_items > 0 else 0
             self.update_buttons()
 
-        def generate_embed(self):
-            items = self.cog.get_page_items(self.page)
+        async def generate_embed(self):
+            items = await self.cog.get_page_items(self.page)
             header = "Name           Quantity    Price\n"
             store_lines = []
             for name, quantity, price in items:
@@ -207,7 +213,7 @@ class Store(commands.Cog):
             if self.page > 0: #Technically dont need this since should be disabled
                 self.page -= 1
                 self.update_buttons()
-                await interaction.response.edit_message(embed=self.generate_embed(), view=self)
+                await interaction.response.edit_message(embed=await self.generate_embed(), view=self)
 
         @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
         async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -218,7 +224,7 @@ class Store(commands.Cog):
             if self.page < self.max_page: #Technically dont need this since should be disabled
                 self.page += 1
                 self.update_buttons()
-                await interaction.response.edit_message(embed=self.generate_embed(), view=self)    
+                await interaction.response.edit_message(embed=await self.generate_embed(), view=self)    
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Store(bot))

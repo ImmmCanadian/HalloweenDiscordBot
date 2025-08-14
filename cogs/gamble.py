@@ -1,4 +1,4 @@
-import discord, random, asyncio
+import discord, random, asyncio, asqlite
 from discord.ext import commands
 from discord import app_commands, File
 from discord.ui import Button, View
@@ -19,176 +19,246 @@ class Gamble(commands.Cog):
     
     @app_commands.command(name="rps", description="Gamble on rock paper scissors!")
     async def rps(self, interaction: discord.Interaction, bet: int):
-
-        winnings = 0
-        won = False
+        
         user_id = interaction.user.id
         user_name = interaction.user.name
 
         if await self.check_user_bet(interaction, bet, user_id, user_name):
             return
         
-        embed = discord.Embed(title=f"Rock Paper Scissors!", description=f"You: {RPS_SYMBOLS['question_mark']}      Bot: {RPS_SYMBOLS['question_mark']}.", color=0x9B59B6)
-        embed.set_author(
-            name=f"{user_name}",
-            icon_url=interaction.user.display_avatar.url)
-
-        buttons = View()
-        rock_button = Button(label="🪨 Rock", style=discord.ButtonStyle.danger, custom_id="rock")
-        paper_button = Button(label="📄 Paper", style=discord.ButtonStyle.danger, custom_id="paper")
-        scissors_button = Button(label="✂️ Scissors", style=discord.ButtonStyle.danger, custom_id="scissors")
-
-        buttons.add_item(rock_button)
-        buttons.add_item(paper_button)
-        buttons.add_item(scissors_button)
-
-        await interaction.response.send_message(embed=embed,view=buttons, ephemeral=False)
-
-        message = await interaction.original_response()
-
-        def check(inter):
-            return inter.user.id == interaction.user.id and inter.message.id == message.id
-
-        while True:
-            try:
-                inter = await self.bot.wait_for('interaction', timeout=60.0, check=check)
-                await inter.response.defer()
-                bot_pick = random.choice(RPS_BOT_CHOICES)
-                embed.description= (f"You: {RPS_SYMBOLS[inter.data['custom_id']]}      Bot: {RPS_SYMBOLS[bot_pick]}.")
-
-                #Player draws with bot
-                if inter.data['custom_id'] == bot_pick:
-                    embed.set_footer(text = "You tied! Try again!")
-                    await message.edit(embed=embed, view=buttons)
-
-                #Player winning conditions
-                elif inter.data['custom_id'] == "rock" and bot_pick == "scissors":
-                    won=True
-                    winnings= int(bet * 1.9)
-                    break
-                elif inter.data['custom_id'] == "paper" and bot_pick == "rock":
-                    won=True
-                    winnings= int(bet * 1.9)
-                    break
-                elif inter.data['custom_id'] == "scissors" and bot_pick == "paper":
-                    won=True
-                    winnings= int(bet * 1.9)
-                    break
-
-                #Player losing conditions
-                elif inter.data['custom_id'] == "scissors" and bot_pick == "rock":
-                    break
-                elif inter.data['custom_id'] == "rock" and bot_pick == "paper":
-                    break
-                elif inter.data['custom_id'] == "paper" and bot_pick == "scissors":
-                    break 
-
-            except Exception as e:
-                print(f"Interaction failed with error: {e}")
-                await message.delete()
-
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
-
-        cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (bet, user_id))
-        cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (winnings, user_id))
-            
-        connection.commit()
-        connection.close()
-
-        buttons.clear_items()
+        view = self.RPSView(interaction.user, bet, self)
+        embed = view.create_initial_embed()  
+        await interaction.response.send_message(embed=embed, view=view)
+    
+        # Store the message so we can edit on timeout
+        view.message = await interaction.original_response()
         
-        if won:
-            embed.set_footer(text= f"You won! You won a total of {winnings}!")
-        else:
-            embed.set_footer(text= "You lost! Better luck next time!")
+    class RPSView(discord.ui.View):
+        def __init__(self, user: discord.User, bet: int, cog):
+            super().__init__(timeout=60)
+            self.user = user
+            self.bet = bet
+            self.cog = cog
+            self.user_choice = None
+            self.message = None
             
-        await message.edit(embed=embed, view=buttons)
+        @discord.ui.button(label="🪨 Rock", style=discord.ButtonStyle.danger)
+        async def rock_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            await self.process_choice(interaction, "rock")
+        
+        @discord.ui.button(label="📄 Paper", style=discord.ButtonStyle.danger)
+        async def paper_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            await self.process_choice(interaction, "paper")
+        
+        @discord.ui.button(label="✂️ Scissors", style=discord.ButtonStyle.danger)
+        async def scissors_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            await self.process_choice(interaction, "scissors")
+        
+        async def process_choice(self, interaction: discord.Interaction, choice: str):
+            bot_choice = random.choice(["rock", "paper", "scissors"])
+            
+            # Determine winner
+            if choice == bot_choice:
+                # It's a tie don't stop the view, let them try again
+                embed = self.create_embed(choice, bot_choice, "tie")
+                await interaction.response.edit_message(embed=embed, view=self)
+                return
+            
+            won = False
+            if (choice == "rock" and bot_choice == "scissors") or \
+            (choice == "paper" and bot_choice == "rock") or \
+            (choice == "scissors" and bot_choice == "paper"):
+                won = True
+                winnings = int(self.bet * 1.9)
+            else:
+                winnings = 0
+            
+            await self.cog.user_update_candy(winnings, self.bet, self.user.id)
+            
+            # Disable all buttons
+            for item in self.children:
+                item.disabled = True
+            
+            embed = self.create_embed(choice, bot_choice, "win" if won else "lose", winnings)
+            await interaction.response.edit_message(embed=embed, view=self)
+            self.stop()
+        
+        def create_initial_embed(self):
+            embed = discord.Embed(
+                title="Rock Paper Scissors!", 
+                description=f"You: {RPS_SYMBOLS['question_mark']}      Bot: {RPS_SYMBOLS['question_mark']}.", 
+                color=0x9B59B6
+            )
+            embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url
+            )
+            embed.set_footer(text="Choose your move!")
+            return embed
+        
+        def create_embed(self, user_choice, bot_choice, result, winnings=0):
+            embed = discord.Embed(title=f"Rock Paper Scissors!", description=f"You: {RPS_SYMBOLS[user_choice]}      Bot: {RPS_SYMBOLS[bot_choice]}.", color=0x9B59B6)
+            embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url)
+
+            if result == "tie":
+               embed.set_footer(text = "You tied! Try again!")
+            elif result == "win":
+                embed.set_footer(text= f"You won! You won a total of {winnings}!")
+            else:
+                embed.set_footer(text= "You lost! Better luck next time!")
+            
+            return embed
+           
+        async def on_timeout(self):
+            # Disable all buttons when timeout occurs
+            for item in self.children:
+                item.disabled = True
+            if self.message:
+                await self.message.edit(view=self)
     
     @app_commands.command(name="coin-toss", description="Gamble on a coin toss!")
     async def cointoss(self, interaction: discord.Interaction, bet: int):
-
-        winnings = 0
-        won = False
+        
         user_id = interaction.user.id
         user_name = interaction.user.name
         
         if await self.check_user_bet(interaction, bet, user_id, user_name):
             return
-         
-        embed = discord.Embed(title=f"Coin toss!", description=f"Make your choice!.", color=0x9B59B6)
-        embed.set_author(
-            name=f"{user_name}",
-            icon_url=interaction.user.display_avatar.url)
-
-        buttons = View()
-        heads_button = Button(label="Heads", style=discord.ButtonStyle.danger, custom_id="heads")
-        tails_button = Button(label="Tails", style=discord.ButtonStyle.danger, custom_id="tails")
-        side_button = Button(label="Side", style=discord.ButtonStyle.danger, custom_id="side")
-
-        buttons.add_item(heads_button)
-        buttons.add_item(tails_button)
-        buttons.add_item(side_button)
         
-        embed.set_image(url=f"attachment://start.png")
-        gif_file = File(f"images/start.png", filename=f"start.png")
-
-        await interaction.response.send_message(embed=embed,view=buttons, file=gif_file, ephemeral=False)
-
-        message = await interaction.original_response()
-
-        def check(inter):
-            return inter.user.id == interaction.user.id and inter.message.id == message.id
-
-        try:
-            inter = await self.bot.wait_for('interaction', timeout=60.0, check=check)
-            await inter.response.defer()
-        except Exception as e:
-            print(f"Interaction failed with error: {e}")
-            return
-        
-        bot_pick = random.choices(COIN_TOSS_CHOICES, weights=COIN_WEIGHTS, k=1)[0]
-        embed.description= (f"Flipping.")
+        view = self.CoinTossView(interaction.user, bet, self)
+        embed, gif_file = view.create_initial_embed()  
+        await interaction.response.send_message(embed=embed, view=view, file=gif_file, ephemeral=False)
+    
+        # Store the message so we can edit on timeout
+        view.message = await interaction.original_response()
         
         
-        buttons.clear_items()
-        
-        embed.set_image(url=f"attachment://{bot_pick}.gif")
-        gif_file = File(f"images/{bot_pick}.gif", filename=f"{bot_pick}.gif")
-        await message.edit(embed=embed,view=buttons, attachments=[gif_file])
-        
-        await asyncio.sleep(3.9 if bot_pick != "side" else 2.7)
-        
-        embed.set_image(url=f"attachment://end-{bot_pick}.webp")
-        gif_file = File(f"images/end-{bot_pick}.webp", filename=f"end-{bot_pick}.webp")
-        await message.edit(embed=embed,view=buttons, attachments=[gif_file])
+    class CoinTossView(discord.ui.View):
+        def __init__(self, user: discord.User, bet: int, cog):
+            super().__init__(timeout=60)
+            self.user = user
+            self.bet = bet
+            self.cog = cog
+            self.user_choice = None
+            self.message = None
             
-        #Player Wins, Dont need to check losing conditions
-        if inter.data['custom_id'] == bot_pick and inter.data['custom_id'] == "side":
-            winnings = bet * 9
-            won=True
-        elif inter.data['custom_id'] == bot_pick:
-            winnings = bet * 2
-            won=True
+        @discord.ui.button(label="Heads", style=discord.ButtonStyle.danger)
+        async def heads_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            await self.process_choice(interaction, "heads")
         
-
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
-
-        cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (bet, user_id))
-        cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', (winnings, user_id))
+        @discord.ui.button(label="Tails", style=discord.ButtonStyle.danger)
+        async def tails_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            await self.process_choice(interaction, "tails")
+        
+        @discord.ui.button(label="Side", style=discord.ButtonStyle.danger)
+        async def side_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            await self.process_choice(interaction, "side")
+        
+        async def process_choice(self, interaction: discord.Interaction, choice: str):
+           # Defer first to acknowledge the button click
+            await interaction.response.defer()
             
-        connection.commit()
-        connection.close()
+            bot_choice = random.choices(COIN_TOSS_CHOICES, weights=COIN_WEIGHTS, k=1)[0]
+            
+            # Disable all buttons
+            for item in self.children:
+                item.disabled = True
+            
+            # Show flipping animation
+            embed, gif_file = self.create_gif_embed(bot_choice)
+            await interaction.edit_original_response(embed=embed, view=self, attachments=[gif_file])
+            
+            await asyncio.sleep(3.9 if bot_choice != "side" else 2.7)
+            
+            won = False
+            
+            # User wins side
+            if choice == bot_choice and choice == "side":
+                won = True
+                winnings = self.bet*9
+                embed, gif_file = self.create_embed(bot_choice, winnings, won)
+                await interaction.edit_original_response(embed=embed, view=self, attachments=[gif_file])
+                
+            elif choice == bot_choice:
+                won = True
+                winnings = self.bet*2
+                embed, gif_file = self.create_embed(bot_choice, winnings, won)
+                await interaction.edit_original_response(embed=embed, view=self, attachments=[gif_file])
+            else:
+                winnings = 0
+                embed, gif_file = self.create_embed(bot_choice, winnings, won)
+                await interaction.edit_original_response(embed=embed, view=self, attachments=[gif_file])
+
+            await self.cog.user_update_candy(winnings, self.bet, self.user.id)
+            
+            self.stop()
         
-        embed.description= (f"Results:")
+        def create_initial_embed(self):
+            embed = discord.Embed(title=f"Coin toss!", description=f"Make your choice!.", color=0x9B59B6)
+            embed.set_author(
+            name=f"{self.user.name}",
+            icon_url=self.user.display_avatar.url)
+
+            embed.set_image(url=f"attachment://start.png")
+            gif_file = File(f"images/start.png", filename=f"start.png")
+
+            return embed, gif_file
         
-        if won:
-            embed.set_footer(text = f"You won {winnings} candy!")
-        else:
-            embed.set_footer(text = f"You lost. Better luck next time!")
-               
-        await message.edit(embed=embed, view=buttons)
+        def create_gif_embed(self, bot_pick):
+            embed = discord.Embed(title=f"Coin toss!", description=f"Flipping!", color=0x9B59B6)
+            embed.set_author(
+            name=f"{self.user.name}",
+            icon_url=self.user.display_avatar.url)
+
+            embed.set_image(url=f"attachment://{bot_pick}.gif")
+            gif_file = File(f"images/{bot_pick}.gif", filename=f"{bot_pick}.gif")
+            
+            return embed, gif_file
+            
+        def create_embed(self, choice, winnings, won):
+            
+            embed = discord.Embed(title=f"Coin toss!", description=f"Result:", color=0x9B59B6)
+            embed.set_author(
+            name=f"{self.user.name}",
+            icon_url=self.user.display_avatar.url)
+            
+            embed.set_image(url=f"attachment://end-{choice}.webp")
+            gif_file = File(f"images/end-{choice}.webp", filename=f"end-{choice}.webp")
+            
+            if won:
+                embed.set_footer(text = f"You won {winnings} candy!")
+            else:
+                embed.set_footer(text = f"You lost. Better luck next time!")
+            
+            return embed, gif_file
+            
+        async def on_timeout(self):
+            # Disable all buttons when timeout occurs
+            for item in self.children:
+                item.disabled = True
+            if self.message:
+                await self.message.edit(view=self)
+        
         
     async def check_user_bet(self, interaction, bet, user_id, user_name):
         
@@ -199,20 +269,28 @@ class Gamble(commands.Cog):
         utils_cog = self.bot.get_cog("Utils")
         await utils_cog.check_user_exists(user_id, user_name)
 
-        connection = sqlite3.connect('./database.db')
-        cursor = connection.cursor()
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
 
-        cursor.execute(f'SELECT candy FROM users WHERE id = ?', (user_id,))
-        user_candy_amount = cursor.fetchone()[0]
-            
-        connection.commit()
-        connection.close()
+                await cursor.execute(f'SELECT candy FROM users WHERE id = ?', (user_id,))
+                user_candy_amount = await cursor.fetchone()
+                user_candy_amount = user_candy_amount[0]
+                
 
         if user_candy_amount < bet:
-            await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=False)
-            return True
+                await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=False)
+                return True      
         
         return False
+    
+    async def user_update_candy(self, winnings, bet, user_id):
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+
+                await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', ((winnings-bet), user_id))
+                
+                await connection.commit()
+                
 
 
 async def setup(bot: commands.Bot):
