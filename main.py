@@ -3,7 +3,7 @@ from cogs import EXTENSIONS
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
-
+from datetime import datetime
 
 #Set the path to out current working directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,10 +20,45 @@ intents = discord.Intents.none()
 intents.members = True
 intents.message_content = True
 intents.messages = True
+intents.guilds = True
+
+# Create timestamped log file
+def setup_logging():
+    # Create logs directory if it doesn't exist
+    log_dir = 'logs'
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    # Create timestamped filename
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    log_filename = os.path.join(log_dir, f'discord_{timestamp}.log')
+    
+    # Setup logging configuration
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename, encoding='utf-8', mode='w'),
+            logging.StreamHandler()  # This will also print to console
+        ]
+    )
+    
+    # Set discord.py logging level
+    discord_logger = logging.getLogger('discord')
+    discord_logger.setLevel(logging.INFO)
+    
+    print(f"Logging to: {log_filename}")
+    return log_filename
+
+# Setup logging
+log_file = setup_logging()
 
 async def load_database():
     async with asqlite.connect('database.db') as connection:
         async with connection.cursor() as cursor:
+            
+            await cursor.execute("DROP TABLE Users")
+            await connection.commit()
             
             # Create Users tables if doesnt exist
             create_users_table_query = '''
@@ -31,16 +66,20 @@ async def load_database():
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL,
                 candy INTEGER DEFAULT 0,
+                bank INTEGER DEFAULT 0,
                 rob_cooldown REAL DEFAULT 0,
                 robbed_cooldown REAL DEFAULT 0,
                 daily_cooldown REAL DEFAULT 0,
-                hourly_cooldown REAL DEFAULT 0
+                hourly_cooldown REAL DEFAULT 0,
+                weekly_cooldown REAL DEFAULT 0,
+                roles TEXT DEFAULT '[]',
+                pets TEXT DEFAULT '[]'
             );
             '''
             await cursor.execute(create_users_table_query)
 
-            # cursor.execute("DROP TABLE Store")
-            # connection.commit()
+            # await cursor.execute("DROP TABLE Store")
+            # await connection.commit()
 
             # Create Store tables if doesnt exist
             create_store_table_query = '''
@@ -49,7 +88,8 @@ async def load_database():
                 role INTEGER DEFAULT 0,
                 quantity TEXT DEFAULT 0,
                 role_id INTEGER DEFAULT 0,
-                price INTEGER DEFAULT 0
+                price INTEGER DEFAULT 0,
+                pet TEXT DEFAULT 0
             );
             '''
             await cursor.execute(create_store_table_query)
@@ -88,7 +128,14 @@ class HalloweenBot(commands.Bot):
                 print(f"Failed to sync: {e}")
 
     async def on_ready(self):
+        logging.info(f"Bot logged in as {self.user} (ID: {self.user.id})")
         print(f"Logged in as {self.user} (ID: {self.user.id})")
+        
+        for guild in self.guilds:
+            logging.info(f"Guild: {guild.name} (ID: {guild.id})")
+            logging.info(f"  Roles: {[role.name for role in guild.roles]}")
+            print(f"Guild: {guild.name} (ID: {guild.id})")
+            print(f"  Roles: {[role.name for role in guild.roles]}")
 
     async def on_command_error(self, ctx, error):
         if isinstance(error, commands.CommandNotFound):

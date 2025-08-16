@@ -1,4 +1,4 @@
-import discord, random, asqlite
+import discord, random, asqlite, json
 from discord.ext import commands
 from discord import app_commands
 
@@ -23,6 +23,8 @@ class UserCommands(commands.Cog):
 
             if cooldown_name == "daily_cooldown":
                 reward = random.randint(1000, 2000)
+            elif cooldown_name == "weekly_cooldown":
+                reward = random.randint(5000, 10000)
             else:
                 reward = random.randint(100, 200)
 
@@ -42,6 +44,52 @@ class UserCommands(commands.Cog):
     @app_commands.command(name="hourly-candy", description="Claim your hourly candy!")
     async def hourlycandy(self, interaction: discord.Interaction):
         await self.candy_cooldown(interaction)
+    
+    @app_commands.command(name="weekly-candy", description="Claim your weekly candy!")
+    async def weeklycandy(self, interaction: discord.Interaction):
+        await self.candy_cooldown(interaction)
+        
+        
+    async def bank(self, interaction: discord.Interaction, amount: int):
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+        
+        utils_cog = self.bot.get_cog("Utils")
+
+        await utils_cog.check_user_exists(user_id, user_name)
+        
+        if interaction.command.name == "deposit":
+            command_name = "deposit"
+        else:
+            command_name = "withdraw"
+        
+        async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    if command_name == "deposit":
+                        await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+                    else:
+                        await cursor.execute(f'SELECT bank FROM Users WHERE id = ?', (user_id,))
+                    user_candy_amount = await cursor.fetchone()
+                    user_candy_amount= user_candy_amount[0]
+                    
+                    if user_candy_amount < amount:
+                        await interaction.response.send_message(f"You can't {command_name} candy that you dont got.")
+                    elif command_name == "deposit":
+                        await cursor.execute(f'UPDATE users SET candy = candy - ?, bank = bank + ? WHERE id = ?', (amount, amount, user_id))
+                        await interaction.response.send_message(f"You have deposited {amount} candy successfully.")
+                    else:
+                        await cursor.execute(f'UPDATE users SET candy = candy + ?, bank = bank - ? WHERE id = ?', (amount, amount, user_id))
+                        await interaction.response.send_message(f"You have withdrawn {amount} candy successfully.")
+                        
+                    await connection.commit()
+        
+    @app_commands.command(name="deposit", description="Deposit your candy! Makes it safe from robbing.")
+    async def deposit(self, interaction: discord.Interaction, amount: int):
+        await self.bank(interaction, amount)
+          
+    @app_commands.command(name="withdraw", description="Withdraw your candy!")
+    async def withdraw(self, interaction: discord.Interaction, amount: int):
+        await self.bank(interaction, amount)
 
     @app_commands.command(name="send-candy", description="Send candy to someone.")
     async def sendycandy(self, interaction: discord.Interaction, target: discord.Member, amount: int):
@@ -85,14 +133,15 @@ class UserCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
-                await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+                await cursor.execute(f'SELECT candy, bank FROM Users WHERE id = ?', (user_id,))
                 user_candy_amount = await cursor.fetchone()
-                
+                 
                 await connection.commit()
-
+                
+        bank_balance= user_candy_amount[1]
         user_candy_amount= user_candy_amount[0]
-
-        await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy.")
+        
+        await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy in your pockets. \nYou have {bank_balance} in your bank!")
 
     @app_commands.command(name="cooldowns", description="Check all of your cooldowns.")
     async def cooldowns(self, interaction: discord.Interaction):
@@ -173,6 +222,38 @@ class UserCommands(commands.Cog):
         embed.add_field(name="Purchase",value=f"Buy an item from the store! Name is case sensitive.",inline=False)
 
         await interaction.response.send_message(embed=embed)
+        
+    @app_commands.command(name="profile", description="Display your profile!")
+    async def profile(self, interaction: discord.Interaction):
+        
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+        
+        utils_cog = self.bot.get_cog("Utils")
+        await utils_cog.check_user_exists(user_id, user_name)
+        
+        async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(f'SELECT candy, bank, roles, pets FROM Users WHERE id = ?', (user_id,))
+                    db_result = await cursor.fetchone()
+        
+        candy, bank, roles_json, pets_json = db_result
+        roles = json.loads(roles_json) if roles_json else []
+        pets = json.loads(pets_json) if pets_json else []
+        
+        roles_str = ", ".join(roles) if roles else "None"
+        pets_str = ", ".join(pets) if pets else "None"
+        
+        embed = discord.Embed(title=f"Your Profile!", description=f"Here is everything about you", color=0x9B59B6)
+        embed.set_author(
+        name=f"{interaction.user.name}",
+        icon_url=interaction.user.display_avatar.url)
+        embed.add_field(name="Your Balances", value = f"{candy} candy in your pockets.\n {bank} candy in your bank.", inline=False)
+        embed.add_field(name="Your Pets", value = pets_str, inline=False)
+        embed.add_field(name="Your Roles", value = roles_str, inline=False)
+
+        await interaction.response.send_message(embed=embed)
+    
 
     @app_commands.command(name="rob", description="Steal someones candy!")
     async def rob(self, interaction: discord.Interaction, target: discord.Member):
@@ -213,7 +294,7 @@ class UserCommands(commands.Cog):
                     elif db_result < 200:
                         steal = random.randint(0, db_result)
                     else:
-                        steal = random.randint(0, 200)
+                        steal = random.randint(0, 500)
 
                     await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
                     await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))

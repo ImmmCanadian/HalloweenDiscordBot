@@ -1,4 +1,4 @@
-import discord, asqlite, asyncio
+import discord, asqlite, asyncio, json
 from discord.ext import commands
 from discord import app_commands
 import sqlite3
@@ -11,73 +11,89 @@ class Store(commands.Cog):
     
     @app_commands.command(name="add-store-item", description="Add an item to the store or add more quantity.")
     @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(role="Either put the role name without the @ (Ex. Crackhead) or put None (Not a role)")
-    async def add_store_item(self, interaction: discord.Interaction , item_name: str, quantity: int, role: str, price: int):
-
+    @app_commands.describe(role="Either put the role name without the @ (Ex. Crackhead) or put None (Not a role)", pet = "Yes if pet No if not.")
+    async def add_store_item(self, interaction: discord.Interaction, item_name: str, quantity: int, role: str, pet: str, price: int):
+        # Defer the response immediately to prevent timeout
+        await interaction.response.defer(ephemeral=True)
+        
+        print(f"Searching for role: '{role}'")
         role_id = 0
 
-        if role != "None":
-            role_id = discord.utils.find(lambda r: r.name.lower() == role.lower(), interaction.guild.roles)
-            if role_id is None:
-                await interaction.response.send_message("This role doesn't exist in the server. Please create the role before trying to add it to the store.", ephemeral=True)
+        if role.lower() != "none":
+            # More flexible role searching
+            role_obj = None
+            
+            # Try exact match first (case insensitive)
+            role_obj = discord.utils.find(lambda r: r.name.lower() == role.lower(), interaction.guild.roles)
+            
+            if role_obj is None:
+                await interaction.followup.send("This role doesn't exist in the server. Please create the role before trying to add it to the store.", ephemeral=True)
                 return
-            role_id = role_id.id
+            role_id = role_obj.id
 
         if quantity <= 0:
-            await interaction.response.send_message("Quantity must be greater than zero.", ephemeral=True)
+            await interaction.followup.send("Quantity must be greater than zero.", ephemeral=True)
             return
 
         if price < 0:
-            await interaction.response.send_message("Price can not be negative.", ephemeral=True)
+            await interaction.followup.send("Price can not be negative.", ephemeral=True)
             return
 
-        async with asqlite.connect('./database.db') as connection:
-            async with connection.cursor() as cursor:
+        try:
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    # Returns None if item does not exist in our DB
+                    await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+                    result = await cursor.fetchone()
 
-                #Returns None if item does not exist in our DB
-                await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
-                result = await cursor.fetchone()
+                    if result is None:
+                        await cursor.execute('INSERT INTO Store (name, role, pet, quantity, role_id, price) VALUES (?, ?, ?, ?, ?, ?)',
+                                    (item_name, role, pet, quantity, role_id, price))
+                    else:
+                        await cursor.execute('UPDATE Store SET quantity = quantity + ? WHERE name = ?', (quantity, item_name))
+                        
+                    await connection.commit()
+        except Exception as e:
+            print(f"Database error: {e}")
+            await interaction.followup.send("An error occurred while updating the database.", ephemeral=True)
+            return
 
-                if result is None:
-                    await cursor.execute('INSERT INTO Store (name, role, quantity, role_id, price) VALUES (?, ?, ?, ?, ?)',
-                                (item_name, role, quantity, role_id, price))
-                else:
-                    await cursor.execute(f'UPDATE Store SET quantity = quantity + ? WHERE name = ?', (quantity, item_name))
-                    
-                await connection.commit()
-                
-
-        await interaction.response.send_message(f"Item added successfully.", ephemeral=True)
+        await interaction.followup.send(f"Item added successfully.", ephemeral=True)
 
     @app_commands.command(name="remove-store-item", description="Remove an item to the store or reduce the quantity (0 quantity removes it).")
     @app_commands.default_permissions(administrator=True)
-    async def remove_store_item(self, interaction: discord.Interaction , item_name: str, quantity: int):
+    async def remove_store_item(self, interaction: discord.Interaction, item_name: str, quantity: int):
+        # Defer the response immediately to prevent timeout
+        await interaction.response.defer(ephemeral=True)
 
-        async with asqlite.connect('./database.db') as connection:
-            async with connection.cursor() as cursor:
+        try:
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    # Returns None if item does not exist in our DB
+                    await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
+                    result = await cursor.fetchone()
 
-                #Returns None if item does not exist in our DB
-                await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
-                result = await cursor.fetchone()
+                    if result is None:
+                        await interaction.followup.send("Item does not exist in our database.", ephemeral=True)
+                        return
 
-                if result is None:
-                    await interaction.response.send_message("Item does not exist in our database.", ephemeral=True)
-                    return
+                    # Returns our items quantity
+                    await cursor.execute('SELECT quantity FROM Store WHERE name = ?', (item_name,))
+                    result = await cursor.fetchone()
+                    current_quantity = result[0]
 
-                #Returns our items quantity
-                await cursor.execute('SELECT quantity FROM Store WHERE name = ?', (item_name,))
-                result = await cursor.fetchone()
-                result = result[0]
+                    if int(current_quantity) - quantity <= 0:
+                        await cursor.execute('DELETE FROM Store WHERE name = ?', (item_name,))
+                    else:
+                        await cursor.execute('UPDATE Store SET quantity = quantity - ? WHERE name = ?', (quantity, item_name))
+                        
+                    await connection.commit()
+        except Exception as e:
+            print(f"Database error: {e}")
+            await interaction.followup.send("An error occurred while updating the database.", ephemeral=True)
+            return
 
-                if int(result) - quantity <= 0:
-                    await cursor.execute(f'DELETE FROM Store WHERE name = ?', (item_name,))
-                else:
-                    await cursor.execute(f'UPDATE Store SET quantity = quantity - ? WHERE name = ?', (quantity, item_name))
-                    
-                await connection.commit()
-                
-
-        await interaction.response.send_message(f"Item removed successfully.", ephemeral=True)
+        await interaction.followup.send(f"Item removed successfully.", ephemeral=True)
     
     @app_commands.command(name="purchase", description="Purchase an item from the store")
     @app_commands.describe(item_name="Case sensitive, enter the exact item name")
@@ -110,6 +126,7 @@ class Store(commands.Cog):
                 price = int(result[4])
                 stock = int(result[2])
                 role_id = int(result[3])
+                pet = result[5]
 
                 #Check if user trying to purchase more than 1 of a role or user already has the role
                 if (quantity > 1 and role_id > 0) or interaction.user.get_role(role_id) != None: 
@@ -132,12 +149,33 @@ class Store(commands.Cog):
                     return
                 
                 if role_id > 0: #If the item we are trying to buy is a role
+                    
                     await interaction.user.add_roles(interaction.guild.get_role(role_id))
                     await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (price, user_id))
                     await cursor.execute(f'UPDATE store SET quantity = quantity - 1 WHERE name = ?', (item_name, ))
+                    
+                    if pet.lower() == "yes":  
+                        await cursor.execute("SELECT pets FROM Users WHERE id = ?", (user_id,))
+                        row = await cursor.fetchone()
+                        pets = json.loads(row[0]) if row[0] else []
+                        pets.append(item_name)
+                        await cursor.execute(
+                            "UPDATE Users SET pets = ? WHERE id = ?",
+                            (json.dumps(pets), user_id)
+                        )
+                    else:
+                        await cursor.execute("SELECT roles FROM Users WHERE id = ?", (user_id,))
+                        row = await cursor.fetchone()
+                        roles = json.loads(row[0]) if row[0] else []
+                        roles.append(item_name)
+                        await cursor.execute(
+                            "UPDATE Users SET roles = ? WHERE id = ?",
+                            (json.dumps(roles), user_id)
+                        )
+                    
                     await connection.commit()
                     
-                    await interaction.response.send_message("You have bought and gotten your role!", ephemeral=False)
+                    await interaction.response.send_message("You have bought and gotten your item!", ephemeral=False)
 
 
     async def get_total_items(self):

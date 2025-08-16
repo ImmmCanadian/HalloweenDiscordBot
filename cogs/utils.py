@@ -6,12 +6,14 @@ from discord import app_commands
 class Utils(commands.Cog):
 
     name_reference = {
+            'weekly-candy': "weekly_cooldown",
             'daily-candy': "daily_cooldown",
             'hourly-candy': "hourly_cooldown",
             'rob': "rob_cooldown"
         }
 
     time_reference = {
+            'weekly_cooldown': 604800,
             'daily_cooldown': 86400,
             'hourly_cooldown': 3600,
             'rob_cooldown': 3600

@@ -42,8 +42,10 @@ class AdminCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
-                await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (amount, target.id))
-                    
+                await cursor.execute(f'UPDATE Users SET candy = candy - ? WHERE id = ?', (amount, target.id))
+                check = await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target.id,))
+                if check < 0:
+                    await cursor.execute(f'UPDATE Users SET candy = 0 WHERE id = ?', (target.id,))
                 await connection.commit()
                 
 
