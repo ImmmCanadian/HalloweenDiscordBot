@@ -2,6 +2,9 @@ import discord, random, asqlite, json
 from discord.ext import commands
 from discord import app_commands
 
+ROB_CHOICES = ["SUCCEED", "FAIL"]
+ROB_WEIGHTS = [0.7,0.3]
+
 class UserCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -279,29 +282,49 @@ class UserCommands(commands.Cog):
         user_time_left = cooldown_data['user_time_left']
         
         if not cooldown_data['user_on_cooldown'] and not cooldown_data['target_on_cooldown']:
+            
+            bot_choice = random.choices(ROB_CHOICES, weights=ROB_WEIGHTS, k=1)[0]
+            if bot_choice == "SUCCEED":
+                async with asqlite.connect('./database.db') as connection:
+                    async with connection.cursor() as cursor:
 
-            async with asqlite.connect('./database.db') as connection:
-                async with connection.cursor() as cursor:
+                        await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
+                        db_result = await cursor.fetchone()
+                        db_result= db_result[0]
 
-                    await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
-                    db_result = await cursor.fetchone()
-                    db_result= db_result[0]
+                        #Edge case: If user has no candy or has less than the max steal amount
+                        if db_result == 0:
+                            await interaction.response.send_message(f"You tried to steal candy {target.name}, but they had nothing to steal! Unlucky.")
+                            return
+                        elif db_result < 200:
+                            steal = random.randint(0, db_result)
+                        else:
+                            steal = random.randint(0, 500)
 
-                    #Edge case: If user has no candy or has less than the max steal amount
-                    if db_result == 0:
-                        await interaction.response.send_message(f"You tried to steal candy {target.name}, but they had nothing to steal! Unlucky.")
-                        return
-                    elif db_result < 200:
-                        steal = random.randint(0, db_result)
-                    else:
-                        steal = random.randint(0, 500)
+                        await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
+                        await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
+                        
 
-                    await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
-                    await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ?', (steal, executed_time, target_id))
-                    await connection.commit()
+                await interaction.response.send_message(f"{interaction.user.mention} stole {steal} candy from {target.mention}!")
+            else: #Fail logic
+                async with asqlite.connect('./database.db') as connection:
+                    async with connection.cursor() as cursor:
+                        await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+                        db_result = await cursor.fetchone()
+                        db_result= db_result[0]
 
-            await interaction.response.send_message(f"{interaction.user.mention} stole {steal} candy from {target.mention}!")
-        
+                        #Edge case: If user has no candy or has less than the max steal amount
+                        if db_result == 0:
+                            await interaction.response.send_message(f"You tried to steal candy {target.name}, but you got caught! Luckily, you are poor and have nothing to lose.")
+                            return
+                        elif db_result < 200:
+                            steal = random.randint(0, db_result)
+                        else:
+                            steal = random.randint(0, 500)
+                        await interaction.response.send_message(f"You tried to steal candy {target.name}, but you got caugh! The cops beat your fucking ass and you lost {steal} candy.")
+                        
+                        await cursor.execute(f'UPDATE users SET candy = candy - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
+                
         elif not cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed
             await interaction.response.send_message(f"This user can't be robbed for another {utils_cog.convert_seconds_to_string(target_time_left)} hours.")
         elif cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed and user on cooldown

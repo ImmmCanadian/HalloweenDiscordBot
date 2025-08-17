@@ -50,6 +50,42 @@ class AdminCommands(commands.Cog):
                 
 
         await interaction.response.send_message(f"You took {amount} candy from {target.name}!")
+        
+    @app_commands.command(name="reset-cooldowns", description="Resets all users cooldowns.")
+    @app_commands.default_permissions(administrator=True)
+    async def resetcooldowns(self, interaction: discord.Interaction):
+        # Respond immediately to prevent webhook timeout
+        await interaction.response.send_message("⏳ Resetting all user cooldowns...")
+        
+        try:
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    # Get count before update
+                    await cursor.execute('SELECT COUNT(*) FROM users')
+                    user_count = (await cursor.fetchone())[0]
+                    
+                    # Reset all cooldowns
+                    await cursor.execute('''
+                        UPDATE users 
+                        SET rob_cooldown = 0,
+                            robbed_cooldown = 0,
+                            daily_cooldown = 0,
+                            hourly_cooldown = 0,
+                            weekly_cooldown = 0
+                    ''')
+                    
+                    await connection.commit()
+            
+            # Edit the original response
+            await interaction.edit_original_response(content=f"✅ Successfully reset cooldowns for {user_count} users!")
+            
+        except Exception as e:
+            print(f"Error resetting cooldowns: {e}")
+            try:
+                await interaction.edit_original_response(content="❌ An error occurred while resetting cooldowns.")
+            except:
+                # If editing fails, try to send a new message
+                await interaction.channel.send("❌ An error occurred while resetting cooldowns.")
     
     @app_commands.command(name="admin-help", description="Check what all of your commands do.")
     @app_commands.default_permissions(administrator=True)
