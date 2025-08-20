@@ -57,8 +57,8 @@ async def load_database():
     async with asqlite.connect('database.db') as connection:
         async with connection.cursor() as cursor:
             
-            await cursor.execute("DROP TABLE Users")
-            await connection.commit()
+            # await cursor.execute("DROP TABLE Users")
+            # await connection.commit()
             
             # Create Users tables if doesnt exist
             create_users_table_query = '''
@@ -73,7 +73,9 @@ async def load_database():
                 hourly_cooldown REAL DEFAULT 0,
                 weekly_cooldown REAL DEFAULT 0,
                 roles TEXT DEFAULT '[]',
-                pets TEXT DEFAULT '[]'
+                pets TEXT DEFAULT '[]',
+                bg_color TEXT DEFAULT 'purple',
+                bg_image TEXT DEFAULT NULL
             );
             '''
             await cursor.execute(create_users_table_query)
