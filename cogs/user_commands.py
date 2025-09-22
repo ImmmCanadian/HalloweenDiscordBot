@@ -540,11 +540,9 @@ class UserCommands(commands.Cog):
         # Create the profile image
         profile_image = await self.create_profile_image(interaction.user, candy, bank, roles)
         
-        # Send just the image file without embed
         await interaction.response.send_message(file=profile_image)
 
     async def create_profile_image(self, user, candy, bank, roles):
-        """Create a beautiful profile card using Pillow"""
         
         # Card dimensions
         width, height = 800, 500
@@ -555,14 +553,14 @@ class UserCommands(commands.Cog):
         
         # Load the preset background image
         try:
-            # Get the path to the background image - go up from cogs to parent, then into images
-            cog_dir = Path(__file__).parent.parent  # Go up to parent directory of cogs
+            # Get the path to the background image
+            cog_dir = Path(__file__).parent.parent 
             bg_image_path = cog_dir / "images" / "bgimage.jpg"  
             
             if bg_image_path.exists():
                 bg_img = Image.open(bg_image_path).convert('RGB')
                 
-                # Resize to fit card dimensions (cover mode)
+                # Resize to fit card dimensions
                 bg_img = self.resize_image_cover(bg_img, width, height)
                 
                 # Paste background image
@@ -578,7 +576,6 @@ class UserCommands(commands.Cog):
                 draw.rectangle([0, 0, width, height], fill=(30, 30, 40))
         except Exception as e:
             print(f"Failed to load background image: {e}")
-            # Fill with a solid dark color as fallback
             draw.rectangle([0, 0, width, height], fill=(30, 30, 40))
         
         # Load fonts - try multiple font paths for better compatibility
@@ -723,7 +720,7 @@ class UserCommands(commands.Cog):
                 fill=(255, 255, 255), width=2)
 
     def resize_image_cover(self, img, target_width, target_height):
-        """Resize image to cover the target dimensions (like CSS background-size: cover)"""
+        
         img_width, img_height = img.size
         
         # Calculate scale factors
