@@ -1,7 +1,7 @@
 import discord, random, time, asqlite
 from typing import Optional
 from discord.ext import commands
-from discord import app_commands
+
 
 class Utils(commands.Cog):
 

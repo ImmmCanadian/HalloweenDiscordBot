@@ -3,8 +3,10 @@ from discord.ext import commands
 from discord import app_commands, File
 from discord.ui import Button, View
 from PIL import Image, ImageDraw, ImageFont
-import sqlite3
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 RPS_BOT_CHOICES=["rock","paper","scissors"]
 RPS_SYMBOLS={"rock": "🪨",
@@ -14,6 +16,11 @@ RPS_SYMBOLS={"rock": "🪨",
 
 COIN_TOSS_CHOICES = ["heads","tails","side"]
 COIN_WEIGHTS = [0.45,0.45,0.1]
+
+# American Roulette number colors
+RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
+GREEN_NUMBERS = {0, 37}  # 0 and 00 (represented as 37)
 
 class Gamble(commands.Cog):
     def __init__(self, bot):
@@ -92,6 +99,7 @@ class Gamble(commands.Cog):
             
             embed = self.create_embed(choice, bot_choice, "win" if won else "lose", winnings)
             await interaction.response.edit_message(embed=embed, view=self)
+            
             self.stop()
         
         def create_initial_embed(self):
@@ -222,7 +230,7 @@ class Gamble(commands.Cog):
             icon_url=self.user.display_avatar.url)
 
             embed.set_image(url=f"attachment://start.png")
-            gif_file = File(f"images/start.png", filename=f"start.png")
+            gif_file = File(io.BytesIO(self.cog.bot.image_cache["start.png"]), filename="start.png")
 
             return embed, gif_file
         
@@ -233,7 +241,7 @@ class Gamble(commands.Cog):
             icon_url=self.user.display_avatar.url)
 
             embed.set_image(url=f"attachment://{bot_pick}.gif")
-            gif_file = File(f"images/{bot_pick}.gif", filename=f"{bot_pick}.gif")
+            gif_file = File(io.BytesIO(self.cog.bot.image_cache[f"{bot_pick}.gif"]), filename=f"{bot_pick}.gif")
             
             return embed, gif_file
             
@@ -245,7 +253,7 @@ class Gamble(commands.Cog):
             icon_url=self.user.display_avatar.url)
             
             embed.set_image(url=f"attachment://end-{choice}.webp")
-            gif_file = File(f"images/end-{choice}.webp", filename=f"end-{choice}.webp")
+            gif_file = File(io.BytesIO(self.cog.bot.image_cache[f"end-{choice}.webp"]), filename=f"end-{choice}.webp")
             
             if won:
                 embed.set_footer(text = f"You won {winnings} candy!")
@@ -643,7 +651,682 @@ class Gamble(commands.Cog):
                 aces -= 1
             
             return total
+
+    @app_commands.command(name="slot-machine", description="Use the slot machine!")
+    async def slotmachine(self, interaction: discord.Interaction, bet: int):
         
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+
+        if await self.check_user_bet(interaction, bet, user_id, user_name):
+            return
+        
+        view = self.SlotMachineView(interaction.user, bet, self)
+        embed = view.create_initial_embed()  
+        await interaction.response.send_message(embed=embed, view=view)
+
+        # Store the message so we can edit on timeout
+        view.message = await interaction.original_response()
+
+    class SlotMachineView(discord.ui.View):
+        def __init__(self, user: discord.User, bet: int, cog):
+            super().__init__(timeout=45)
+            self.user = user
+            self.bet = bet
+            self.cog = cog
+            self.message = None
+            self.is_spinning = False
+            self.game_completed = False
+            
+            # Slot machine symbols and their weights/payouts
+            self.symbols = ["🍒", "🍋", "🍊", "🍇", "🔔", "💎"]
+            self.symbol_weights = [35, 30, 20, 10, 4, 1]  # Higher = more common
+            
+            self.payout_table = {
+                # --- Three of a kind (main wins) ---
+                "💎💎💎": 300,   # Jackpot (super rare)
+                "🔔🔔🔔": 30,    # Very rare
+                "🍇🍇🍇": 12,    # Rare
+                "🍊🍊🍊": 5,     # Uncommon
+                "🍋🍋🍋": 2.5,   # Common
+                "🍒🍒🍒": 1.5,   # Most common
+
+                # --- Mixed combos (toned down) ---
+                "🍒🍒🍊": 1.2,   # Used to be 3x → now just above break-even
+                "🍒🍋🍊": 0.5,   # Small consolation
+                "💎💎🍋": 8,     # Two diamonds + common
+                "💎💎🍊": 8,
+                "💎💎🍒": 8,
+                "🔔🔔🍒": 3,     # Reduced
+                "🔔🔔🍋": 3,
+
+                # --- Two of a kind (mostly losses disguised as wins) ---
+                "💎💎": 3,       # Still decent
+                "🔔🔔": 1,       # Break-even
+                "🍇🍇": 0.7,     # Small loss
+                "🍊🍊": 0.5,     # Half back
+                "🍋🍋": 0.3,     # Bigger loss
+                "🍒🍒": 0.1,     # Token return only
+                }
+            
+        @discord.ui.button(label="🎰 SPIN!", style=discord.ButtonStyle.success, custom_id="spin_button")
+        async def spin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            
+            if self.is_spinning:
+                await interaction.response.send_message("Wait for the current spin to finish!", ephemeral=True)
+                return
+            
+            # Check if user still has enough chips for another bet
+            user_id = interaction.user.id
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (self.user.id,))
+                    result = await cursor.fetchone()
+                    
+            if result is None or result[0] < self.bet:
+                await interaction.response.send_message("You don't have enough chips for another spin!", ephemeral=True)
+                return
+                
+            self.game_completed = False
+            
+            await self.start_spinning(interaction)
+        
+        async def start_spinning(self, interaction: discord.Interaction):
+            self.is_spinning = True
+            self.children[0].disabled = True  # Disable spin button during spin
+            
+            await interaction.response.defer()
+            
+            # Pre-determine the final 3x3 grid
+            final_grid = []
+            for row in range(3):
+                row_symbols = []
+                for col in range(3):
+                    symbol = random.choices(self.symbols, weights=self.symbol_weights, k=1)[0]
+                    row_symbols.append(symbol)
+                final_grid.append(row_symbols)
+            
+            # Spinning animation - all reels spin together
+            for spin_count in range(10):
+                # Create random spinning grid
+                spinning_grid = []
+                for row in range(3):
+                    row_symbols = []
+                    for col in range(3):
+                        symbol = random.choice(self.symbols)
+                        row_symbols.append(symbol)
+                    spinning_grid.append(row_symbols)
+                
+                embed = discord.Embed(
+                    title="🎰 **SLOT MACHINE** 🎰",
+                    description=self.create_slot_display(spinning_grid),
+                    color=0xFFD700
+                )
+                embed.set_author(
+                    name=f"{self.user.name}'s Slot Machine",
+                    icon_url=self.user.display_avatar.url
+                )
+                embed.add_field(name="Bet Amount", value=f"{self.bet} chips", inline=True)
+                embed.set_footer(text="🎰 Spinning... 🎰")
+                
+                await self.message.edit(embed=embed, view=self)
+                await asyncio.sleep(0.05)
+            
+            # Final result
+            self.is_spinning = False
+            await self.finalize_result(final_grid)
+        
+        async def finalize_result(self, grid):
+            # Check all 3 horizontal lines for wins using new payout system
+            winning_lines = []
+            total_winnings = 0
+            
+            for row_index, row in enumerate(grid):
+                line_winnings = self.calculate_line_payout(row)
+                if line_winnings > 0:
+                    actual_winnings = int(self.bet * line_winnings)
+                    total_winnings += actual_winnings
+                    winning_lines.append({
+                        'line': row_index,
+                        'symbols': row,
+                        'winnings': actual_winnings,
+                        'multiplier': line_winnings
+                    })
+            
+            # Determine win type
+            if total_winnings > 0:
+                # Check if any line has jackpot (💎💎💎)
+                has_jackpot = any("💎💎💎" == "".join(line['symbols']) for line in winning_lines)
+                win_type = "jackpot" if has_jackpot else "win"
+            else:
+                win_type = "lose"
+            
+            # Update user's chips
+            await self.cog.user_update_candy(total_winnings, self.bet, self.user.id)
+            
+            # Create final embed
+            embed = self.create_final_embed(grid, win_type, total_winnings, winning_lines)
+            
+           
+            self.children[0].disabled = False
+            
+            self.game_completed = True
+            
+            await self.message.edit(embed=embed, view=self)
+        
+        def calculate_line_payout(self, line):
+            """Calculate payout for a single line based on symbol combinations"""
+            line_str = "".join(line)
+            
+            # Check for exact matches in payout table first
+            if line_str in self.payout_table:
+                return self.payout_table[line_str]
+            
+            # Check for reverse of mixed combinations (order shouldn't matter for some)
+            reverse_line = line_str[::-1]
+            if reverse_line in self.payout_table:
+                return self.payout_table[reverse_line]
+            
+            # Check for two of a kind (any two matching symbols in the line)
+            symbol_counts = {}
+            for symbol in line:
+                symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+            
+            # Find pairs and return the highest payout
+            best_payout = 0
+            for symbol, count in symbol_counts.items():
+                if count == 2:
+                    pair_key = f"{symbol}{symbol}"
+                    if pair_key in self.payout_table:
+                        payout = self.payout_table[pair_key]
+                        if payout > best_payout:
+                            best_payout = payout
+            
+            return best_payout
+        
+        def create_initial_embed(self):
+            initial_grid = [
+                ["❓", "❓", "❓"],
+                ["❓", "❓", "❓"], 
+                ["❓", "❓", "❓"]
+            ]
+            
+            embed = discord.Embed(
+                title="🎰 **SLOT MACHINE** 🎰",
+                description=self.create_slot_display(initial_grid),
+                color=0x9B59B6
+            )
+            embed.set_author(
+                name=f"{self.user.name}'s Slot Machine",
+                icon_url=self.user.display_avatar.url
+            )
+            embed.add_field(name="Bet Amount", value=f"{self.bet} chips", inline=True)
+            embed.add_field(name="Win Condition", value="**3 matching OR 2 pairs OR mixed combos**", inline=True)
+            embed.add_field(name="Potential Payouts", value=self.get_payout_info(), inline=False)
+            embed.set_footer(text="Click SPIN to start!")
+            return embed
+        
+        def create_slot_display(self, symbols_grid, winning_lines=None):
+            line_indicators = ["", "", ""]
+            if winning_lines:
+                for line_info in winning_lines:
+                    line_num = line_info['line']
+                    line_indicators[line_num] = " ← WIN!"
+
+            def format_cell(symbol):
+                # Add spaces around symbol to keep each cell visually same width
+                return f" {symbol} "
+
+            display = "```\n"
+            display += "┌───────────────┐\n"
+            for i in range(3):
+                row = f"│{format_cell(symbols_grid[i][0])}│{format_cell(symbols_grid[i][1])}│{format_cell(symbols_grid[i][2])}│"
+                display += f"{row}{line_indicators[i]}\n"
+            display += "└───────────────┘\n"
+            display += "```"
+            return display
+        
+        def create_final_embed(self, grid, win_type, total_winnings, winning_lines):
+            if win_type == "jackpot":
+                color = 0xFFD700  # Gold
+                title = "🎰 **JACKPOT!** 🎰"
+                footer_text = f"🎉 INCREDIBLE! You won {total_winnings} chips! 🎉"
+            elif win_type == "win":
+                color = 0x00FF00  # Green
+                title = "🎰 **WINNER!** 🎰"
+                footer_text = f"🎊 Awesome! You won {total_winnings} chips! 🎊"
+            else:
+                color = 0xFF0000  # Red
+                title = "🎰 **SLOT MACHINE** 🎰"
+                footer_text = f"😢 No luck this time! You lost {self.bet} chips."
+            
+            embed = discord.Embed(
+                title=title,
+                description=self.create_slot_display(grid, winning_lines),
+                color=color
+            )
+            embed.set_author(
+                name=f"{self.user.name}'s Slot Machine",
+                icon_url=self.user.display_avatar.url
+            )
+            
+            if winning_lines:
+                lines_text = ""
+                for line_info in winning_lines:
+                    line_names = ["Top", "Middle", "Bottom"]
+                    line_name = line_names[line_info['line']]
+                    symbols = " ".join(line_info['symbols'])
+                    lines_text += f"**{line_name}:** {symbols} (+{line_info['winnings']})\n"
+                embed.add_field(name="Winning Lines", value=lines_text, inline=True)
+                embed.add_field(name="Total Winnings", value=f"+{total_winnings} chips", inline=True)
+            else:
+                embed.add_field(name="No Wins", value="No matching lines", inline=True)
+                embed.add_field(name="Loss", value=f"-{self.bet} chips", inline=True)
+            
+            embed.set_footer(text=footer_text)
+            return embed
+        
+        def get_payout_info(self):
+            lines = []
+
+            # --- Major Wins (3 of a kind) ---
+            majors = {
+                "💎💎💎": "JACKPOT!",
+                "🔔🔔🔔": "Very Rare",
+                "🍇🍇🍇": "Rare",
+                "🍊🍊🍊": "Uncommon",
+                "🍋🍋🍋": "Common",
+                "🍒🍒🍒": "Most Common"
+            }
+            lines.append("**🎯 Major Wins:**")
+            for combo, label in majors.items():
+                if combo in self.payout_table:
+                    lines.append(f"{combo} = {self.payout_table[combo]}x ({label})")
+
+            # --- Mixed Combos ---
+            mixed = ["🍒🍒🍊", "🍒🍋🍊", "💎💎🍋", "💎💎🍊", "💎💎🍒", "🔔🔔🍒", "🔔🔔🍋"]
+            lines.append("\n**🎲 Mixed Combos:**")
+            for combo in mixed:
+                if combo in self.payout_table:
+                    lines.append(f"{combo} = {self.payout_table[combo]}x")
+
+            # --- Two of a Kind ---
+            pairs = ["💎💎", "🔔🔔", "🍇🍇", "🍊🍊", "🍋🍋", "🍒🍒"]
+            lines.append("\n**🎪 Two of a Kind:**")
+            for combo in pairs:
+                if combo in self.payout_table:
+                    lines.append(f"{combo} = {self.payout_table[combo]}x")
+
+            return "\n".join(lines)
+        
+        async def on_timeout(self):
+            # Disable all buttons when timeout occurs
+            for item in self.children:
+                item.disabled = True
+            if self.message:
+                embed = discord.Embed(
+                    title="🎰 Slot Machine Expired",
+                    description="This slot machine session has expired.",
+                    color=0x808080
+                )
+                await self.message.edit(embed=embed, view=self)
+
+
+    @app_commands.command(name="roulette", description="Play American Roulette! Bet on red, black, or green!")
+    @app_commands.describe(
+        bet="Amount of candy to bet",
+        color="Choose a color: red, black, or green"
+    )
+    @app_commands.choices(color=[
+        app_commands.Choice(name="🔴 Red", value="red"),
+        app_commands.Choice(name="⚫ Black", value="black"),
+        app_commands.Choice(name="🟢 Green", value="green")
+    ])
+    async def roulette(self, interaction: discord.Interaction, bet: int, color: str):
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+
+        if await self.check_user_bet(interaction, bet, user_id, user_name):
+            return
+        
+        view = self.RouletteView(interaction.user, bet, color, self)
+        embed = view.create_initial_embed()
+        await interaction.response.send_message(embed=embed, view=view)
+        
+        # Store the message so we can edit on timeout
+        view.message = await interaction.original_response()
+
+    class RouletteView(discord.ui.View):
+        def __init__(self, user: discord.User, bet: int, color: str, cog):
+            super().__init__(timeout=45)
+            self.user = user
+            self.bet = bet
+            self.color = color
+            self.cog = cog
+            self.message = None
+            self.is_spinning = False
+            self.total_winnings = 0
+            self.total_losses = 0
+            self.spin_count = 0
+            self.win_count = 0
+            self.loss_count = 0
+            self.final_wheel_display = None  # Store the wheel position
+            
+        @discord.ui.button(label="🎰 SPIN!", style=discord.ButtonStyle.success, custom_id="spin_button")
+        async def spin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            
+            if self.is_spinning:
+                await interaction.response.send_message("Wait for the current spin to finish!", ephemeral=True)
+                return
+            
+            # Check if user still has enough candy for another bet
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute('SELECT candy FROM Users WHERE id = ?', (self.user.id,))
+                    result = await cursor.fetchone()
+                    
+            if result is None or result[0] < self.bet:
+                await interaction.response.send_message("You don't have enough candy for another spin!", ephemeral=True)
+                return
+            
+            await self.start_spinning(interaction)
+        
+        @discord.ui.button(label="💰 Cash Out", style=discord.ButtonStyle.danger, custom_id="cashout_button")
+        async def cashout_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            
+            if self.is_spinning:
+                await interaction.response.send_message("Wait for the spin to finish!", ephemeral=True)
+                return
+            
+            # Disable all buttons
+            for item in self.children:
+                item.disabled = True
+            
+            embed = self.create_final_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+            self.stop()
+        
+        async def start_spinning(self, interaction: discord.Interaction):
+            self.is_spinning = True
+            self.spin_count += 1
+            
+            # Generate result first (0-37, where 37 represents 00)
+            result_number = random.randint(0, 37)
+            display_number = "00" if result_number == 37 else str(result_number)
+            result_color = self.get_number_color(result_number)
+            
+            # Create spinning sequences
+            spin_sequence = []
+            for _ in range(11):
+                spin_sequence.append(random.choice(["red", "black", "black", "red", "red", "black"]))
+            
+            # Insert some greens occasionally in random positions (but not the middle)
+            green_pos = random.choice([0, 1, 2, 3, 4, 6, 7, 8, 9, 10])
+            spin_sequence[green_pos] = "green"
+            
+            # Create final sequence with the actual result in the middle (position 5)
+            final_sequence = spin_sequence.copy()
+            final_sequence[5] = result_color
+            
+            # Animation - spin the wheel
+            pointer = "⬇️"
+            spins = 20  # Number of animation frames
+            
+            # First response to the interaction
+            first_embed = discord.Embed(
+                title="🎰 Roulette Wheel Spinning... 🎰",
+                description="Starting the wheel...",
+                color=0xFFD700
+            )
+            first_embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url
+            )
+            await interaction.response.edit_message(embed=first_embed, view=self)
+            
+            # Get the message for editing during animation
+            message = await interaction.original_response()
+            
+            for i in range(spins):
+                # Rotate the sequence during spin
+                if i < spins - 5:  # Keep spinning fast
+                    spin_sequence = spin_sequence[-1:] + spin_sequence[:-1]
+                elif i == spins - 1:  # Last frame - use final sequence
+                    spin_sequence = final_sequence
+                else:  # Slowing down
+                    # Gradually transition to final sequence
+                    if i == spins - 3:
+                        spin_sequence[5] = result_color  # Lock in the result
+                
+                # Convert colors to emoji squares
+                wheel_display = ""
+                for j, color in enumerate(spin_sequence):
+                    if color == "red":
+                        wheel_display += "🟥"
+                    elif color == "black":
+                        wheel_display += "⬛"
+                    else:  # green
+                        wheel_display += "🟩"
+                    
+                    if j < len(spin_sequence) - 1:
+                        wheel_display += " "
+                
+                # Create the spinning embed with centered arrows
+                embed = discord.Embed(
+                    title="🎰 Roulette Wheel Spinning... 🎰",
+                    description=f"```\n                {pointer}\n{wheel_display}\n                ⬆️\n```",
+                    color=0xFFD700
+                )
+                embed.set_author(
+                    name=f"{self.user.name}",
+                    icon_url=self.user.display_avatar.url
+                )
+                embed.add_field(name="Your Bet", value=f"{self.bet} candy on {self.get_color_emoji(self.color)} {self.color.upper()}", inline=False)
+                
+                if i < spins - 8:
+                    embed.set_footer(text="The wheel is spinning fast...")
+                elif i < spins - 3:
+                    embed.set_footer(text="The wheel is slowing down...")
+                else:
+                    embed.set_footer(text="Almost there...")
+                
+                # Edit the message directly, not through interaction
+                await message.edit(embed=embed, view=self)
+                
+                # Variable speed - faster at start, slower at end
+                if i < 10:
+                    await asyncio.sleep(0.05)
+                elif i < 15:
+                    await asyncio.sleep(0.05)
+                else:
+                    await asyncio.sleep(0.05)
+            
+            # Store the final wheel position for display in result embeds
+            self.final_wheel_display = ""
+            for j, color in enumerate(final_sequence):
+                if color == "red":
+                    self.final_wheel_display += "🟥"
+                elif color == "black":
+                    self.final_wheel_display += "⬛"
+                else:  # green
+                    self.final_wheel_display += "🟩"
+                
+                if j < len(final_sequence) - 1:
+                    self.final_wheel_display += " "
+            
+            # Check if won
+            won = (self.color == result_color)
+            
+            if won:
+                if self.color == "green":
+                    # Green pays 35:1 in American roulette (for 0 or 00)
+                    winnings = int(self.bet * 35)
+                else:
+                    # Red/Black pays 1:1
+                    winnings = int(self.bet * 2)
+                
+                self.total_winnings += winnings
+                self.win_count += 1
+                await self.cog.user_update_candy(winnings, self.bet, self.user.id)
+                embed = self.create_win_embed(display_number, result_color, winnings)
+            else:
+                self.total_losses += self.bet
+                self.loss_count += 1
+                await self.cog.user_update_candy(0, self.bet, self.user.id)
+                embed = self.create_lose_embed(display_number, result_color)
+            
+            self.is_spinning = False
+            await message.edit(embed=embed, view=self)
+        
+        def get_number_color(self, number):
+            """Get the color of a number in American roulette"""
+            if number in GREEN_NUMBERS:
+                return "green"
+            elif number in RED_NUMBERS:
+                return "red"
+            else:
+                return "black"
+        
+        def get_color_emoji(self, color):
+            """Get emoji for a color"""
+            emojis = {
+                "red": "🔴",
+                "black": "⚫",
+                "green": "🟢"
+            }
+            return emojis.get(color, "⚪")
+        
+        def create_initial_embed(self):
+            # Create a default wheel display
+            default_wheel = "🟥 ⬛ 🟥 ⬛ 🟥 🟩 ⬛ 🟥 ⬛ 🟥 ⬛"
+            
+            embed = discord.Embed(
+                title="🎰 American Roulette 🎰",
+                description=f"```\n                ⬇️\n{default_wheel}\n                ⬆️\n```\nPress **SPIN** to start the wheel!",
+                color=self.get_embed_color(self.color)
+            )
+            embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url
+            )
+            embed.add_field(name="Your Bet", value=f"{self.bet} candy", inline=True)
+            embed.add_field(name="Betting On", value=f"{self.get_color_emoji(self.color)} {self.color.upper()}", inline=True)
+            
+            if self.color == "green":
+                embed.add_field(name="Payout", value="35:1", inline=True)
+            else:
+                embed.add_field(name="Payout", value="1:1", inline=True)
+                
+            embed.set_footer(text="45 second timeout • Keep spinning or cash out anytime!")
+            return embed
+        
+        def create_win_embed(self, number, color, winnings):
+            wheel_section = ""
+            if self.final_wheel_display:
+                wheel_section = f"```\n                ⬇️\n{self.final_wheel_display}\n                ⬆️\n```\n"
+            
+            embed = discord.Embed(
+                title="🎉 WINNER! 🎉",
+                description=f"{wheel_section}The ball landed on **{number}** {self.get_color_emoji(color)} {color.upper()}",
+                color=0x2ECC71
+            )
+            embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url
+            )
+            embed.add_field(name="You Bet", value=f"{self.get_color_emoji(self.color)} {self.color.upper()}", inline=True)
+            embed.add_field(name="Winnings", value=f"+{winnings} candy!", inline=True)
+            embed.add_field(name="Net Profit", value=f"{self.total_winnings - self.total_losses} candy", inline=True)
+            
+            embed.add_field(name="Session Stats", value=f"Spins: {self.spin_count} | Wins: {self.win_count} | Losses: {self.loss_count}", inline=False)
+            embed.set_footer(text="Spin again with the same bet or Cash Out!")
+            return embed
+        
+        def create_lose_embed(self, number, color):
+            wheel_section = ""
+            if self.final_wheel_display:
+                wheel_section = f"```\n                ⬇️\n{self.final_wheel_display}\n                ⬆️\n```\n"
+            
+            embed = discord.Embed(
+                title="❌ You Lost",
+                description=f"{wheel_section}The ball landed on **{number}** {self.get_color_emoji(color)} {color.upper()}",
+                color=0xE74C3C
+            )
+            embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url
+            )
+            embed.add_field(name="You Bet", value=f"{self.get_color_emoji(self.color)} {self.color.upper()}", inline=True)
+            embed.add_field(name="Lost", value=f"-{self.bet} candy", inline=True)
+            embed.add_field(name="Net Profit", value=f"{self.total_winnings - self.total_losses} candy", inline=True)
+            
+            embed.add_field(name="Session Stats", value=f"Spins: {self.spin_count} | Wins: {self.win_count} | Losses: {self.loss_count}", inline=False)
+            embed.set_footer(text="Try again with the same bet or Cash Out!")
+            return embed
+        
+        def create_final_embed(self):
+            net_profit = self.total_winnings - self.total_losses
+            if net_profit > 0:
+                title = "💰 Cashed Out with Profit! 💰"
+                color = 0x2ECC71
+                description = f"Congratulations! You made **{net_profit}** candy!"
+            elif net_profit < 0:
+                title = "💸 Cashed Out 💸"
+                color = 0xE74C3C
+                description = f"You lost **{abs(net_profit)}** candy. Better luck next time!"
+            else:
+                title = "💵 Cashed Out - Break Even 💵"
+                color = 0x3498DB
+                description = "You broke even!"
+                
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=color
+            )
+            embed.set_author(
+                name=f"{self.user.name}",
+                icon_url=self.user.display_avatar.url
+            )
+            
+            # Win rate calculation
+            win_rate = (self.win_count / self.spin_count * 100) if self.spin_count > 0 else 0
+            
+            embed.add_field(name="Total Spins", value=self.spin_count, inline=True)
+            embed.add_field(name="Wins/Losses", value=f"{self.win_count}W / {self.loss_count}L", inline=True)
+            embed.add_field(name="Win Rate", value=f"{win_rate:.1f}%", inline=True)
+            embed.add_field(name="Total Won", value=f"{self.total_winnings} candy", inline=True)
+            embed.add_field(name="Total Lost", value=f"{self.total_losses} candy", inline=True)
+            embed.add_field(name="Net Profit", value=f"**{net_profit}** candy", inline=True)
+            
+            embed.set_footer(text="Thanks for playing American Roulette!")
+            return embed
+        
+        def get_embed_color(self, color):
+            """Get embed color based on bet color"""
+            colors = {
+                "red": 0xE74C3C,
+                "black": 0x2C3E50,
+                "green": 0x27AE60
+            }
+            return colors.get(color, 0x3498DB)
+        
+        async def on_timeout(self):
+            # Disable all buttons when timeout occurs
+            for item in self.children:
+                item.disabled = True
+            if self.message:
+                embed = self.create_final_embed()
+                await self.message.edit(embed=embed, view=self)
         
     async def check_user_bet(self, interaction, bet, user_id, user_name):
         
@@ -669,12 +1352,19 @@ class Gamble(commands.Cog):
         return False
     
     async def user_update_candy(self, winnings, bet, user_id):
-        async with asqlite.connect('./database.db') as connection:
-            async with connection.cursor() as cursor:
+        try:
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
 
-                await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ?', ((winnings-bet), user_id))
-                
-                await connection.commit()
+                    await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ? RETURNING candy', ((winnings-bet), user_id))
+                    new_candy_amount = await cursor.fetchone()
+                    await connection.commit()
+            
+            logger.info(f"DB_UPDATE: User gambled {bet} candy.  id: {user_id} Net: {winnings-bet} total: {new_candy_amount[0]}")
+            
+        except Exception as e:
+            logger.error(f"DB_UPDATE ERROR: Failed to update candy for user (ID: {user_id}). Error: {e}")
+            raise
                 
                 
 async def setup(bot: commands.Bot):
