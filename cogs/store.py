@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 ITEMS_PER_PAGE = 5
 camp_upgrades = ["Outfit Update","Extended/Retracted Curfew","Increased Lighting","Generators","Trap/Mechanisms"]
+interactions = ["murder","flower","hero","accusation","interrogation","makeasacrifice","skinnydip","wedgie"]
 
 class Store(commands.Cog):
     def __init__(self, bot):
@@ -22,17 +23,17 @@ class Store(commands.Cog):
         app_commands.Choice(name="Snacks", value="Snacks"),
         app_commands.Choice(name="Supplies", value="Supplies"),
         app_commands.Choice(name="Weapons", value="Weapons"),
-        app_commands.Choice(name="Camp Upgrades", value="Camp Upgrades")
+        app_commands.Choice(name="Camp Upgrades", value="Camp Upgrades"),
+        app_commands.Choice(name="Interactions", value="Interactions")
     ])
     async def add_store_item(self, interaction: discord.Interaction, item_name: str, quantity: int, role: str, category: str, price: int):
-        # Defer the response immediately to prevent timeout
+        
         await interaction.response.defer(ephemeral=True)
         
         print(f"Searching for role: '{role}'")
         role_id = 0
 
         if role.lower() != "none":
-            # More flexible role searching
             role_obj = None
             
             # Try exact match first (case insensitive)
@@ -76,7 +77,7 @@ class Store(commands.Cog):
     @app_commands.command(name="remove-store-item", description="Remove an item to the store or reduce the quantity (0 quantity removes it).")
     @app_commands.default_permissions(administrator=True)
     async def remove_store_item(self, interaction: discord.Interaction, item_name: str, quantity: int):
-        # Defer the response immediately to prevent timeout
+        
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -151,13 +152,18 @@ class Store(commands.Cog):
                 user_candy_amount = await cursor.fetchone()
                 user_candy_amount = user_candy_amount[0]
 
-                if user_candy_amount < price:
+                if user_candy_amount < price*quantity:
                     await interaction.response.send_message(f"{interaction.user.mention} is a brokie and can't afford his item 🤡!", ephemeral = False)
                     
                     return
                 
                 if stock <= 0:
                     await interaction.response.send_message("This item is out of stock!", ephemeral = True)
+                    
+                    return
+                
+                if stock < quantity:
+                    await interaction.response.send_message("You are trying to buy more than the total stock!", ephemeral = True)
                     
                     return
                 
@@ -180,14 +186,14 @@ class Store(commands.Cog):
                         )
                         
                     await connection.commit()
-                    await interaction.response.send_message("You have bought and gotten your item!", ephemeral=False)
+                    await interaction.response.send_message("You have bought and gotten your role!", ephemeral=False)
                     
                 else:
                     
-                    await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (price, user_id))
+                    await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (price*quantity, user_id))
                     new_candy_amount = await cursor.fetchone()
                     new_candy_amount = new_candy_amount[0]
-                    await cursor.execute(f'UPDATE store SET quantity = quantity - 1 WHERE name = ?', (item_name, ))
+                    await cursor.execute(f'UPDATE store SET quantity = quantity - ? WHERE name = ?', (quantity, item_name))
                     
                     await connection.commit()
                     await interaction.response.send_message("You have bought and gotten your item!", ephemeral=False)
@@ -195,8 +201,12 @@ class Store(commands.Cog):
                     if item_name in camp_upgrades:
                         channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
                         await channel.send(f"{user_name} has bought camp upgrade {item_name}")
+                    item_name_parse = item_name.replace(" ", "").lower()
+                    if item_name_parse in interactions:
+                        await cursor.execute(f'UPDATE users SET {item_name_parse}_count = {item_name_parse}_count + ? WHERE id = ?', (quantity, user_id))
+                        
                     
-                logger.info(f"DB_UPDATE: User: {user_name} id: {user_id} bought {item_name} for {price}. New total {new_candy_amount}.")
+                logger.info(f"DB_UPDATE: User: {user_name} id: {user_id} bought {quantity} {item_name} for {price} for total {price*quantity}. New total {new_candy_amount}.")
 
 
     async def get_total_items(self, category=None):
@@ -242,7 +252,8 @@ class Store(commands.Cog):
                 discord.SelectOption(label="Snacks", description="Food and consumables", emoji="🍭"),
                 discord.SelectOption(label="Supplies", description="Essential camp supplies", emoji="🛠️"),
                 discord.SelectOption(label="Weapons", description="Defensive equipment", emoji="⚔️"),
-                discord.SelectOption(label="Camp Upgrades", description="Improve your camp", emoji="🏕️")
+                discord.SelectOption(label="Camp Upgrades", description="Improve your camp", emoji="🏕️"),
+                discord.SelectOption(label="Interactions", description="Purchase a command use", emoji="🏕️")
             ]
             super().__init__(placeholder="Select a category...", min_values=1, max_values=1, options=options)
         

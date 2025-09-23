@@ -169,6 +169,8 @@ class Raffle(commands.Cog):
                     winner_id = random.choices(user_ids, weights=ticket_counts, k=1)[0]
                     winner_list.append((winner_id, win_number))
                     
+                    logger.info(f"RAFFLE: Winner Drawn id: {winner_id}")
+                    
                     # Reduce winner's tickets by 1
                     winner_idx = user_ids.index(winner_id)
                     ticket_counts[winner_idx] -= 1
@@ -190,6 +192,7 @@ class Raffle(commands.Cog):
                 
                 logger.info(f"DB_UPDATE: {interaction.user.name} initiated the raffle draw for {item_name}")
         
+        
         winner_image = await self.create_winner_image(
             item_name, 
             winner_list, 
@@ -200,9 +203,30 @@ class Raffle(commands.Cog):
         file = discord.File(winner_image, filename=f"raffle_winners_{item_name}.png")
 
         await interaction.response.send_message(file=file)
+    
+    async def download_avatars(self, win_counts: dict):
+        avatars = {}
+        
+        async with aiohttp.ClientSession() as session:
+            for user_id in win_counts.keys():
+                user = self.bot.get_user(user_id)
+                if not user:
+                    avatars[user_id] = None
+                    continue
                 
-    async def create_winner_image(self, item_name: str, winner_list: list, original_tickets: dict, total_tickets: int):
-        """Create a winner announcement image"""
+                try:
+                    async with session.get(str(user.display_avatar.url)) as response:
+                        avatar_data = await response.read()
+                        avatars[user_id] = avatar_data
+                except Exception as e:
+                    logger.error(f"Failed to download avatar for user {user_id}: {e}")
+                    avatars[user_id] = None
+        
+        return avatars
+    
+    def create_winner_image_sync(self, item_name: str, winner_list: list, original_tickets: dict, 
+                                  total_tickets: int, avatars: dict, user_info: dict):
+        """Synchronous function for PIL operations - to be run in thread"""
         
         # Count wins per user
         win_counts = {}
@@ -249,11 +273,10 @@ class Raffle(commands.Cog):
         y_position = header_height + padding
         
         for idx, (user_id, wins) in enumerate(win_counts.items()):
-            # Get user info
-            user = self.bot.get_user(user_id)
-            if not user:
-                continue
-                
+            # Get user info from pre-fetched data
+            username = user_info.get(user_id, {}).get('name', f'User {user_id}')
+            avatar_data = avatars.get(user_id)
+            
             tickets = original_tickets[user_id]
             win_chance = (tickets / total_tickets) * 100
             
@@ -266,30 +289,38 @@ class Raffle(commands.Cog):
                 width=2
             )
             
-            # Download and paste avatar
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(str(user.display_avatar.url)) as response:
-                        avatar_data = await response.read()
-                        avatar = Image.open(BytesIO(avatar_data))
-                        
-                        # Resize avatar
-                        avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
-                        
-                        # Make avatar circular (optional)
-                        mask = Image.new('L', (avatar_size, avatar_size), 0)
-                        mask_draw = ImageDraw.Draw(mask)
-                        mask_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
-                        
-                        # Create circular avatar
-                        output = Image.new('RGBA', (avatar_size, avatar_size), (0, 0, 0, 0))
-                        output.paste(avatar, (0, 0))
-                        output.putalpha(mask)
-                        
-                        # Paste on main image
-                        img.paste(output, (padding + 10, y_position), output)
-            except:
-                # If avatar fails, draw a placeholder circle
+            # Process and paste avatar
+            if avatar_data:
+                try:
+                    avatar = Image.open(BytesIO(avatar_data))
+                    
+                    # Resize avatar
+                    avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
+                    
+                    # Make avatar circular
+                    mask = Image.new('L', (avatar_size, avatar_size), 0)
+                    mask_draw = ImageDraw.Draw(mask)
+                    mask_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+                    
+                    # Create circular avatar
+                    output = Image.new('RGBA', (avatar_size, avatar_size), (0, 0, 0, 0))
+                    output.paste(avatar, (0, 0))
+                    output.putalpha(mask)
+                    
+                    # Paste on main image
+                    img.paste(output, (padding + 10, y_position), output)
+                except Exception as e:
+                    logger.error(f"Failed to process avatar for user {user_id}: {e}")
+                    # Draw placeholder
+                    draw.ellipse(
+                        [(padding + 10, y_position), 
+                        (padding + 10 + avatar_size, y_position + avatar_size)],
+                        fill='#95A5A6',
+                        outline='white',
+                        width=2
+                    )
+            else:
+                # Draw placeholder circle if no avatar data
                 draw.ellipse(
                     [(padding + 10, y_position), 
                     (padding + 10 + avatar_size, y_position + avatar_size)],
@@ -301,7 +332,7 @@ class Raffle(commands.Cog):
             # Draw user name
             name_x = padding + avatar_size + 25
             name_y = y_position + 5
-            draw.text((name_x, name_y), user.name, fill='white', font=name_font)
+            draw.text((name_x, name_y), username, fill='white', font=name_font)
             
             # Draw win info
             if wins > 1:
@@ -317,6 +348,40 @@ class Raffle(commands.Cog):
         img_buffer = BytesIO()
         img.save(img_buffer, format='PNG')
         img_buffer.seek(0)
+        
+        return img_buffer
+    
+    async def create_winner_image(self, item_name: str, winner_list: list, original_tickets: dict, total_tickets: int):
+        """Async wrapper that downloads avatars then runs PIL in thread"""
+        
+        # Count wins per user for avatar downloading
+        win_counts = {}
+        for winner_id, _ in winner_list:
+            win_counts[winner_id] = win_counts.get(winner_id, 0) + 1
+        
+        # Prepare user info dictionary
+        user_info = {}
+        for user_id in win_counts.keys():
+            user = self.bot.get_user(user_id)
+            if user:
+                user_info[user_id] = {
+                    'name': user.name,
+                    'display_name': user.display_name
+                }
+        
+        # Download all avatars asynchronously
+        avatars = await self.download_avatars(win_counts)
+        
+        # Run PIL operations in thread to avoid blocking
+        img_buffer = await asyncio.to_thread(
+            self.create_winner_image_sync,
+            item_name,
+            winner_list,
+            original_tickets,
+            total_tickets,
+            avatars,
+            user_info
+        )
         
         return img_buffer
     
@@ -387,8 +452,12 @@ class Raffle(commands.Cog):
             )
         
         # Add footer with total stats
-        total_pot = sum(tickets * cost for _, cost, _, tickets in raffles)
-        total_tickets_sold = sum(tickets for _, _, _, tickets in raffles)
+        total_pot = 0
+        total_tickets_sold = 0
+
+        for item, ticket_cost, winner_count, time, total_tickets in raffles:
+            total_pot += total_tickets * ticket_cost
+            total_tickets_sold += total_tickets
         
         embed.set_footer(
             text=f"Total Tickets Sold: {total_tickets_sold} | Total Pot Value: {total_pot} candy",

@@ -16,7 +16,7 @@ class Utils(commands.Cog):
             'weekly_cooldown': 604800,
             'daily_cooldown': 86400,
             'hourly_cooldown': 3600,
-            'rob_cooldown': 3600
+            'rob_cooldown': 21600
         }
 
     def __init__(self, bot):

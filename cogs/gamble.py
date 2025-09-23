@@ -298,6 +298,7 @@ class Gamble(commands.Cog):
             self.game_state = None
             self.game_over = False
             self.timeout_processed = False  
+            self.payout_processed = False
             
             # Initialize deck and deal cards
             self.deck = self.create_deck()
@@ -305,15 +306,9 @@ class Gamble(commands.Cog):
             self.dealer_cards = [self.draw_card(), self.draw_card()]  
             
             # Calculate totals
+            
             self.user_total = self.calculate_hand_value(self.user_cards)
             self.dealer_total = self.calculate_hand_value([self.dealer_cards[0]])  # Only count visible card initially
-            
-            # Check for blackjack and disable buttons if found
-            if self.user_total == 21:
-                self.game_state = "Blackjack"
-                self.game_over = True
-                for item in self.children:
-                    item.disabled = True
         
         @discord.ui.button(label="Hit", style=discord.ButtonStyle.danger)
         async def hit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -387,7 +382,7 @@ class Gamble(commands.Cog):
             
             # Create updated embed and image
             embed = await self.create_embed()
-            file = self.create_blackjack_image()
+            file = await asyncio.to_thread(self.create_blackjack_image)
             embed.set_image(url="attachment://blackjack.png")
             
             await interaction.response.edit_message(embed=embed, view=self, attachments=[file])
@@ -568,12 +563,31 @@ class Gamble(commands.Cog):
             return embed
         
         async def create_initial_embed(self):
-            # Check for initial blackjack
-            if self.user_total == 21:
-                # Process the blackjack win immediately
-                winnings = int(self.bet * 2.5)
-                await self.cog.user_update_candy(winnings, self.bet, self.user.id)
+            dealer_blackjack_check = self.calculate_hand_value(self.dealer_cards)
             
+            if self.user_total == 21:
+                # Both have blackjack => push
+                if dealer_blackjack_check == 21:
+                    self.game_state = "Push"
+                    self.game_over = True
+                    self.dealer_total = dealer_blackjack_check
+                    if not self.payout_processed:
+                        # return bet (assuming user_update_candy(winnings, bet, id) semantics -- adapt as needed)
+                        await self.cog.user_update_candy(self.bet, self.bet, self.user.id)
+                        self.payout_processed = True
+                else:
+                    # Player blackjack (3:2)
+                    self.game_state = "Blackjack"
+                    self.game_over = True
+                    if not self.payout_processed:
+                        blackjack_total = int(self.bet * 2.5)  # total returned (bet + 1.5*bet)
+                        await self.cog.user_update_candy(blackjack_total, self.bet, self.user.id)
+                        self.payout_processed = True
+
+            if self.game_over:
+                for item in self.children:
+                    item.disabled = True
+
             embed = await self.create_embed()
             return embed
             
@@ -593,14 +607,11 @@ class Gamble(commands.Cog):
                 self.game_state = "Timeout"
                 self.game_over = True
                 
-                # Player loses the bet on timeout (dealer automatically wins)
-                await self.cog.user_update_candy(0, self.bet, self.user.id)
-                
                 # Update the message to show timeout
                 if self.message:
                     try:
                         embed = await self.create_embed()
-                        file = self.create_blackjack_image()
+                        file = await asyncio.to_thread(self.create_blackjack_image)
                         embed.set_image(url="attachment://blackjack.png")
                         await self.message.edit(embed=embed, view=self, attachments=[file])
                     except:
@@ -613,9 +624,10 @@ class Gamble(commands.Cog):
                     await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (self.user.id,))
                     db_result = await cursor.fetchone()
                     
-                    if self.bet * 2 > db_result[0]:
+                    if self.bet > db_result[0]:
                         return False
                     else:
+                        await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (self.bet, self.user.id))
                         return True
         
         def create_deck(self):
@@ -629,7 +641,8 @@ class Gamble(commands.Cog):
             return deck
 
         def draw_card(self):
-            return self.deck.pop()
+            return random.choice(self.deck)
+            # return self.deck.pop()
         
         def calculate_hand_value(self, cards):
             total = 0
@@ -651,329 +664,6 @@ class Gamble(commands.Cog):
                 aces -= 1
             
             return total
-
-    @app_commands.command(name="slot-machine", description="Use the slot machine!")
-    async def slotmachine(self, interaction: discord.Interaction, bet: int):
-        
-        user_id = interaction.user.id
-        user_name = interaction.user.name
-
-        if await self.check_user_bet(interaction, bet, user_id, user_name):
-            return
-        
-        view = self.SlotMachineView(interaction.user, bet, self)
-        embed = view.create_initial_embed()  
-        await interaction.response.send_message(embed=embed, view=view)
-
-        # Store the message so we can edit on timeout
-        view.message = await interaction.original_response()
-
-    class SlotMachineView(discord.ui.View):
-        def __init__(self, user: discord.User, bet: int, cog):
-            super().__init__(timeout=45)
-            self.user = user
-            self.bet = bet
-            self.cog = cog
-            self.message = None
-            self.is_spinning = False
-            self.game_completed = False
-            
-            # Slot machine symbols and their weights/payouts
-            self.symbols = ["🍒", "🍋", "🍊", "🍇", "🔔", "💎"]
-            self.symbol_weights = [35, 30, 20, 10, 4, 1]  # Higher = more common
-            
-            self.payout_table = {
-                # --- Three of a kind (main wins) ---
-                "💎💎💎": 300,   # Jackpot (super rare)
-                "🔔🔔🔔": 30,    # Very rare
-                "🍇🍇🍇": 12,    # Rare
-                "🍊🍊🍊": 5,     # Uncommon
-                "🍋🍋🍋": 2.5,   # Common
-                "🍒🍒🍒": 1.5,   # Most common
-
-                # --- Mixed combos (toned down) ---
-                "🍒🍒🍊": 1.2,   # Used to be 3x → now just above break-even
-                "🍒🍋🍊": 0.5,   # Small consolation
-                "💎💎🍋": 8,     # Two diamonds + common
-                "💎💎🍊": 8,
-                "💎💎🍒": 8,
-                "🔔🔔🍒": 3,     # Reduced
-                "🔔🔔🍋": 3,
-
-                # --- Two of a kind (mostly losses disguised as wins) ---
-                "💎💎": 3,       # Still decent
-                "🔔🔔": 1,       # Break-even
-                "🍇🍇": 0.7,     # Small loss
-                "🍊🍊": 0.5,     # Half back
-                "🍋🍋": 0.3,     # Bigger loss
-                "🍒🍒": 0.1,     # Token return only
-                }
-            
-        @discord.ui.button(label="🎰 SPIN!", style=discord.ButtonStyle.success, custom_id="spin_button")
-        async def spin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            if interaction.user.id != self.user.id:
-                await interaction.response.send_message("This isn't your game!", ephemeral=True)
-                return
-            
-            if self.is_spinning:
-                await interaction.response.send_message("Wait for the current spin to finish!", ephemeral=True)
-                return
-            
-            # Check if user still has enough chips for another bet
-            user_id = interaction.user.id
-            async with asqlite.connect('./database.db') as connection:
-                async with connection.cursor() as cursor:
-                    await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (self.user.id,))
-                    result = await cursor.fetchone()
-                    
-            if result is None or result[0] < self.bet:
-                await interaction.response.send_message("You don't have enough chips for another spin!", ephemeral=True)
-                return
-                
-            self.game_completed = False
-            
-            await self.start_spinning(interaction)
-        
-        async def start_spinning(self, interaction: discord.Interaction):
-            self.is_spinning = True
-            self.children[0].disabled = True  # Disable spin button during spin
-            
-            await interaction.response.defer()
-            
-            # Pre-determine the final 3x3 grid
-            final_grid = []
-            for row in range(3):
-                row_symbols = []
-                for col in range(3):
-                    symbol = random.choices(self.symbols, weights=self.symbol_weights, k=1)[0]
-                    row_symbols.append(symbol)
-                final_grid.append(row_symbols)
-            
-            # Spinning animation - all reels spin together
-            for spin_count in range(10):
-                # Create random spinning grid
-                spinning_grid = []
-                for row in range(3):
-                    row_symbols = []
-                    for col in range(3):
-                        symbol = random.choice(self.symbols)
-                        row_symbols.append(symbol)
-                    spinning_grid.append(row_symbols)
-                
-                embed = discord.Embed(
-                    title="🎰 **SLOT MACHINE** 🎰",
-                    description=self.create_slot_display(spinning_grid),
-                    color=0xFFD700
-                )
-                embed.set_author(
-                    name=f"{self.user.name}'s Slot Machine",
-                    icon_url=self.user.display_avatar.url
-                )
-                embed.add_field(name="Bet Amount", value=f"{self.bet} chips", inline=True)
-                embed.set_footer(text="🎰 Spinning... 🎰")
-                
-                await self.message.edit(embed=embed, view=self)
-                await asyncio.sleep(0.05)
-            
-            # Final result
-            self.is_spinning = False
-            await self.finalize_result(final_grid)
-        
-        async def finalize_result(self, grid):
-            # Check all 3 horizontal lines for wins using new payout system
-            winning_lines = []
-            total_winnings = 0
-            
-            for row_index, row in enumerate(grid):
-                line_winnings = self.calculate_line_payout(row)
-                if line_winnings > 0:
-                    actual_winnings = int(self.bet * line_winnings)
-                    total_winnings += actual_winnings
-                    winning_lines.append({
-                        'line': row_index,
-                        'symbols': row,
-                        'winnings': actual_winnings,
-                        'multiplier': line_winnings
-                    })
-            
-            # Determine win type
-            if total_winnings > 0:
-                # Check if any line has jackpot (💎💎💎)
-                has_jackpot = any("💎💎💎" == "".join(line['symbols']) for line in winning_lines)
-                win_type = "jackpot" if has_jackpot else "win"
-            else:
-                win_type = "lose"
-            
-            # Update user's chips
-            await self.cog.user_update_candy(total_winnings, self.bet, self.user.id)
-            
-            # Create final embed
-            embed = self.create_final_embed(grid, win_type, total_winnings, winning_lines)
-            
-           
-            self.children[0].disabled = False
-            
-            self.game_completed = True
-            
-            await self.message.edit(embed=embed, view=self)
-        
-        def calculate_line_payout(self, line):
-            """Calculate payout for a single line based on symbol combinations"""
-            line_str = "".join(line)
-            
-            # Check for exact matches in payout table first
-            if line_str in self.payout_table:
-                return self.payout_table[line_str]
-            
-            # Check for reverse of mixed combinations (order shouldn't matter for some)
-            reverse_line = line_str[::-1]
-            if reverse_line in self.payout_table:
-                return self.payout_table[reverse_line]
-            
-            # Check for two of a kind (any two matching symbols in the line)
-            symbol_counts = {}
-            for symbol in line:
-                symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
-            
-            # Find pairs and return the highest payout
-            best_payout = 0
-            for symbol, count in symbol_counts.items():
-                if count == 2:
-                    pair_key = f"{symbol}{symbol}"
-                    if pair_key in self.payout_table:
-                        payout = self.payout_table[pair_key]
-                        if payout > best_payout:
-                            best_payout = payout
-            
-            return best_payout
-        
-        def create_initial_embed(self):
-            initial_grid = [
-                ["❓", "❓", "❓"],
-                ["❓", "❓", "❓"], 
-                ["❓", "❓", "❓"]
-            ]
-            
-            embed = discord.Embed(
-                title="🎰 **SLOT MACHINE** 🎰",
-                description=self.create_slot_display(initial_grid),
-                color=0x9B59B6
-            )
-            embed.set_author(
-                name=f"{self.user.name}'s Slot Machine",
-                icon_url=self.user.display_avatar.url
-            )
-            embed.add_field(name="Bet Amount", value=f"{self.bet} chips", inline=True)
-            embed.add_field(name="Win Condition", value="**3 matching OR 2 pairs OR mixed combos**", inline=True)
-            embed.add_field(name="Potential Payouts", value=self.get_payout_info(), inline=False)
-            embed.set_footer(text="Click SPIN to start!")
-            return embed
-        
-        def create_slot_display(self, symbols_grid, winning_lines=None):
-            line_indicators = ["", "", ""]
-            if winning_lines:
-                for line_info in winning_lines:
-                    line_num = line_info['line']
-                    line_indicators[line_num] = " ← WIN!"
-
-            def format_cell(symbol):
-                # Add spaces around symbol to keep each cell visually same width
-                return f" {symbol} "
-
-            display = "```\n"
-            display += "┌───────────────┐\n"
-            for i in range(3):
-                row = f"│{format_cell(symbols_grid[i][0])}│{format_cell(symbols_grid[i][1])}│{format_cell(symbols_grid[i][2])}│"
-                display += f"{row}{line_indicators[i]}\n"
-            display += "└───────────────┘\n"
-            display += "```"
-            return display
-        
-        def create_final_embed(self, grid, win_type, total_winnings, winning_lines):
-            if win_type == "jackpot":
-                color = 0xFFD700  # Gold
-                title = "🎰 **JACKPOT!** 🎰"
-                footer_text = f"🎉 INCREDIBLE! You won {total_winnings} chips! 🎉"
-            elif win_type == "win":
-                color = 0x00FF00  # Green
-                title = "🎰 **WINNER!** 🎰"
-                footer_text = f"🎊 Awesome! You won {total_winnings} chips! 🎊"
-            else:
-                color = 0xFF0000  # Red
-                title = "🎰 **SLOT MACHINE** 🎰"
-                footer_text = f"😢 No luck this time! You lost {self.bet} chips."
-            
-            embed = discord.Embed(
-                title=title,
-                description=self.create_slot_display(grid, winning_lines),
-                color=color
-            )
-            embed.set_author(
-                name=f"{self.user.name}'s Slot Machine",
-                icon_url=self.user.display_avatar.url
-            )
-            
-            if winning_lines:
-                lines_text = ""
-                for line_info in winning_lines:
-                    line_names = ["Top", "Middle", "Bottom"]
-                    line_name = line_names[line_info['line']]
-                    symbols = " ".join(line_info['symbols'])
-                    lines_text += f"**{line_name}:** {symbols} (+{line_info['winnings']})\n"
-                embed.add_field(name="Winning Lines", value=lines_text, inline=True)
-                embed.add_field(name="Total Winnings", value=f"+{total_winnings} chips", inline=True)
-            else:
-                embed.add_field(name="No Wins", value="No matching lines", inline=True)
-                embed.add_field(name="Loss", value=f"-{self.bet} chips", inline=True)
-            
-            embed.set_footer(text=footer_text)
-            return embed
-        
-        def get_payout_info(self):
-            lines = []
-
-            # --- Major Wins (3 of a kind) ---
-            majors = {
-                "💎💎💎": "JACKPOT!",
-                "🔔🔔🔔": "Very Rare",
-                "🍇🍇🍇": "Rare",
-                "🍊🍊🍊": "Uncommon",
-                "🍋🍋🍋": "Common",
-                "🍒🍒🍒": "Most Common"
-            }
-            lines.append("**🎯 Major Wins:**")
-            for combo, label in majors.items():
-                if combo in self.payout_table:
-                    lines.append(f"{combo} = {self.payout_table[combo]}x ({label})")
-
-            # --- Mixed Combos ---
-            mixed = ["🍒🍒🍊", "🍒🍋🍊", "💎💎🍋", "💎💎🍊", "💎💎🍒", "🔔🔔🍒", "🔔🔔🍋"]
-            lines.append("\n**🎲 Mixed Combos:**")
-            for combo in mixed:
-                if combo in self.payout_table:
-                    lines.append(f"{combo} = {self.payout_table[combo]}x")
-
-            # --- Two of a Kind ---
-            pairs = ["💎💎", "🔔🔔", "🍇🍇", "🍊🍊", "🍋🍋", "🍒🍒"]
-            lines.append("\n**🎪 Two of a Kind:**")
-            for combo in pairs:
-                if combo in self.payout_table:
-                    lines.append(f"{combo} = {self.payout_table[combo]}x")
-
-            return "\n".join(lines)
-        
-        async def on_timeout(self):
-            # Disable all buttons when timeout occurs
-            for item in self.children:
-                item.disabled = True
-            if self.message:
-                embed = discord.Embed(
-                    title="🎰 Slot Machine Expired",
-                    description="This slot machine session has expired.",
-                    color=0x808080
-                )
-                await self.message.edit(embed=embed, view=self)
-
 
     @app_commands.command(name="roulette", description="Play American Roulette! Bet on red, black, or green!")
     @app_commands.describe(
@@ -1008,6 +698,7 @@ class Gamble(commands.Cog):
             self.cog = cog
             self.message = None
             self.is_spinning = False
+            self.first_spin = True
             self.total_winnings = 0
             self.total_losses = 0
             self.spin_count = 0
@@ -1026,14 +717,20 @@ class Gamble(commands.Cog):
                 return
             
             # Check if user still has enough candy for another bet
-            async with asqlite.connect('./database.db') as connection:
-                async with connection.cursor() as cursor:
-                    await cursor.execute('SELECT candy FROM Users WHERE id = ?', (self.user.id,))
-                    result = await cursor.fetchone()
-                    
-            if result is None or result[0] < self.bet:
-                await interaction.response.send_message("You don't have enough candy for another spin!", ephemeral=True)
-                return
+            if not self.first_spin:
+                async with asqlite.connect('./database.db') as connection:
+                    async with connection.cursor() as cursor:
+                        await cursor.execute('SELECT candy FROM Users WHERE id = ?', (self.user.id,))
+                        result = await cursor.fetchone()
+                        
+                if result is None or result[0] < self.bet:
+                    await interaction.response.send_message("You don't have enough candy for another spin!", ephemeral=True)
+                    return
+                
+                await self.cog.roulette_user_update_candy(self.bet, self.user.id)
+                
+            self.first_spin = False
+            
             
             await self.start_spinning(interaction)
         
@@ -1174,7 +871,7 @@ class Gamble(commands.Cog):
                     # Red/Black pays 1:1
                     winnings = int(self.bet * 2)
                 
-                self.total_winnings += winnings
+                self.total_winnings += winnings - self.bet
                 self.win_count += 1
                 await self.cog.user_update_candy(winnings, self.bet, self.user.id)
                 embed = self.create_win_embed(display_number, result_color, winnings)
@@ -1344,11 +1041,17 @@ class Gamble(commands.Cog):
                 user_candy_amount = await cursor.fetchone()
                 user_candy_amount = user_candy_amount[0]
                 
-
-        if user_candy_amount < bet:
-                await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=False)
-                return True      
-        
+                if user_candy_amount < bet:
+                    await interaction.response.send_message(f"{interaction.user.mention} can't afford to place that bet b-b-b-brokie.", ephemeral=False)
+                    return True
+                
+                
+                await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (bet, user_id))
+                new_candy_amount = await cursor.fetchone()
+                new_candy_amount = new_candy_amount[0]
+                logger.info(f"DB_UPDATE: Removed {user_candy_amount} from user: {user_name}'s id: {user_id} Old total: {user_candy_amount} New Total: {new_candy_amount}")
+                
+                     
         return False
     
     async def user_update_candy(self, winnings, bet, user_id):
@@ -1356,7 +1059,7 @@ class Gamble(commands.Cog):
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
 
-                    await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ? RETURNING candy', ((winnings-bet), user_id))
+                    await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ? RETURNING candy', (winnings, user_id))
                     new_candy_amount = await cursor.fetchone()
                     await connection.commit()
             
@@ -1365,6 +1068,343 @@ class Gamble(commands.Cog):
         except Exception as e:
             logger.error(f"DB_UPDATE ERROR: Failed to update candy for user (ID: {user_id}). Error: {e}")
             raise
+        
+    async def roulette_user_update_candy(self, bet, user_id):
+        try:
+            async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+
+                    await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (bet, user_id))
+                    await connection.commit()
+            
+            logger.info(f"DB_UPDATE: User spun the roulette wheel again for {bet} candy.  id: {user_id} ")
+            
+        except Exception as e:
+            logger.error(f"DB_UPDATE ERROR: Failed to update candy for user (ID: {user_id}). Error: {e}")
+            raise
+        
+    # @app_commands.command(name="slot-machine", description="Use the slot machine!")
+    # async def slotmachine(self, interaction: discord.Interaction, bet: int):
+        
+    #     user_id = interaction.user.id
+    #     user_name = interaction.user.name
+
+    #     if await self.check_user_bet(interaction, bet, user_id, user_name):
+    #         return
+        
+    #     view = self.SlotMachineView(interaction.user, bet, self)
+    #     embed = view.create_initial_embed()  
+    #     await interaction.response.send_message(embed=embed, view=view)
+
+    #     # Store the message so we can edit on timeout
+    #     view.message = await interaction.original_response()
+
+    # class SlotMachineView(discord.ui.View):
+    #     def __init__(self, user: discord.User, bet: int, cog):
+    #         super().__init__(timeout=45)
+    #         self.user = user
+    #         self.bet = bet
+    #         self.cog = cog
+    #         self.message = None
+    #         self.is_spinning = False
+    #         self.game_completed = False
+            
+    #         # Slot machine symbols and their weights/payouts
+    #         self.symbols = ["🍒", "🍋", "🍊", "🍇", "🔔", "💎"]
+    #         self.symbol_weights = [35, 30, 20, 10, 4, 1]  # Higher = more common
+            
+    #         self.payout_table = {
+    #             # --- Three of a kind (main wins) ---
+    #             "💎💎💎": 300,   # Jackpot (super rare)
+    #             "🔔🔔🔔": 30,    # Very rare
+    #             "🍇🍇🍇": 12,    # Rare
+    #             "🍊🍊🍊": 5,     # Uncommon
+    #             "🍋🍋🍋": 2.5,   # Common
+    #             "🍒🍒🍒": 1.5,   # Most common
+
+    #             # --- Mixed combos (toned down) ---
+    #             "🍒🍒🍊": 1.2,   # Used to be 3x → now just above break-even
+    #             "🍒🍋🍊": 0.5,   # Small consolation
+    #             "💎💎🍋": 8,     # Two diamonds + common
+    #             "💎💎🍊": 8,
+    #             "💎💎🍒": 8,
+    #             "🔔🔔🍒": 3,     # Reduced
+    #             "🔔🔔🍋": 3,
+
+    #             # --- Two of a kind (mostly losses disguised as wins) ---
+    #             "💎💎": 3,       # Still decent
+    #             "🔔🔔": 1,       # Break-even
+    #             "🍇🍇": 0.7,     # Small loss
+    #             "🍊🍊": 0.5,     # Half back
+    #             "🍋🍋": 0.3,     # Bigger loss
+    #             "🍒🍒": 0.1,     # Token return only
+    #             }
+            
+    #     @discord.ui.button(label="🎰 SPIN!", style=discord.ButtonStyle.success, custom_id="spin_button")
+    #     async def spin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #         if interaction.user.id != self.user.id:
+    #             await interaction.response.send_message("This isn't your game!", ephemeral=True)
+    #             return
+            
+    #         if self.is_spinning:
+    #             await interaction.response.send_message("Wait for the current spin to finish!", ephemeral=True)
+    #             return
+            
+    #         # Check if user still has enough chips for another bet
+    #         user_id = interaction.user.id
+    #         async with asqlite.connect('./database.db') as connection:
+    #             async with connection.cursor() as cursor:
+    #                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (self.user.id,))
+    #                 result = await cursor.fetchone()
+                    
+    #         if result is None or result[0] < self.bet:
+    #             await interaction.response.send_message("You don't have enough chips for another spin!", ephemeral=True)
+    #             return
+                
+    #         self.game_completed = False
+            
+    #         await self.start_spinning(interaction)
+        
+    #     async def start_spinning(self, interaction: discord.Interaction):
+    #         self.is_spinning = True
+    #         self.children[0].disabled = True  # Disable spin button during spin
+            
+    #         await interaction.response.defer()
+            
+    #         # Pre-determine the final 3x3 grid
+    #         final_grid = []
+    #         for row in range(3):
+    #             row_symbols = []
+    #             for col in range(3):
+    #                 symbol = random.choices(self.symbols, weights=self.symbol_weights, k=1)[0]
+    #                 row_symbols.append(symbol)
+    #             final_grid.append(row_symbols)
+            
+    #         # Spinning animation - all reels spin together
+    #         for spin_count in range(10):
+    #             # Create random spinning grid
+    #             spinning_grid = []
+    #             for row in range(3):
+    #                 row_symbols = []
+    #                 for col in range(3):
+    #                     symbol = random.choice(self.symbols)
+    #                     row_symbols.append(symbol)
+    #                 spinning_grid.append(row_symbols)
+                
+    #             embed = discord.Embed(
+    #                 title="🎰 **SLOT MACHINE** 🎰",
+    #                 description=self.create_slot_display(spinning_grid),
+    #                 color=0xFFD700
+    #             )
+    #             embed.set_author(
+    #                 name=f"{self.user.name}'s Slot Machine",
+    #                 icon_url=self.user.display_avatar.url
+    #             )
+    #             embed.add_field(name="Bet Amount", value=f"{self.bet} chips", inline=True)
+    #             embed.set_footer(text="🎰 Spinning... 🎰")
+                
+    #             await self.message.edit(embed=embed, view=self)
+    #             await asyncio.sleep(0.05)
+            
+    #         # Final result
+    #         self.is_spinning = False
+    #         await self.finalize_result(final_grid)
+        
+    #     async def finalize_result(self, grid):
+    #         # Check all 3 horizontal lines for wins using new payout system
+    #         winning_lines = []
+    #         total_winnings = 0
+            
+    #         for row_index, row in enumerate(grid):
+    #             line_winnings = self.calculate_line_payout(row)
+    #             if line_winnings > 0:
+    #                 actual_winnings = int(self.bet * line_winnings)
+    #                 total_winnings += actual_winnings
+    #                 winning_lines.append({
+    #                     'line': row_index,
+    #                     'symbols': row,
+    #                     'winnings': actual_winnings,
+    #                     'multiplier': line_winnings
+    #                 })
+            
+    #         # Determine win type
+    #         if total_winnings > 0:
+    #             # Check if any line has jackpot (💎💎💎)
+    #             has_jackpot = any("💎💎💎" == "".join(line['symbols']) for line in winning_lines)
+    #             win_type = "jackpot" if has_jackpot else "win"
+    #         else:
+    #             win_type = "lose"
+            
+    #         # Update user's chips
+    #         await self.cog.user_update_candy(total_winnings, self.bet, self.user.id)
+            
+    #         # Create final embed
+    #         embed = self.create_final_embed(grid, win_type, total_winnings, winning_lines)
+            
+           
+    #         self.children[0].disabled = False
+            
+    #         self.game_completed = True
+            
+    #         await self.message.edit(embed=embed, view=self)
+        
+    #     def calculate_line_payout(self, line):
+    #         """Calculate payout for a single line based on symbol combinations"""
+    #         line_str = "".join(line)
+            
+    #         # Check for exact matches in payout table first
+    #         if line_str in self.payout_table:
+    #             return self.payout_table[line_str]
+            
+    #         # Check for reverse of mixed combinations (order shouldn't matter for some)
+    #         reverse_line = line_str[::-1]
+    #         if reverse_line in self.payout_table:
+    #             return self.payout_table[reverse_line]
+            
+    #         # Check for two of a kind (any two matching symbols in the line)
+    #         symbol_counts = {}
+    #         for symbol in line:
+    #             symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+            
+    #         # Find pairs and return the highest payout
+    #         best_payout = 0
+    #         for symbol, count in symbol_counts.items():
+    #             if count == 2:
+    #                 pair_key = f"{symbol}{symbol}"
+    #                 if pair_key in self.payout_table:
+    #                     payout = self.payout_table[pair_key]
+    #                     if payout > best_payout:
+    #                         best_payout = payout
+            
+    #         return best_payout
+        
+    #     def create_initial_embed(self):
+    #         initial_grid = [
+    #             ["❓", "❓", "❓"],
+    #             ["❓", "❓", "❓"], 
+    #             ["❓", "❓", "❓"]
+    #         ]
+            
+    #         embed = discord.Embed(
+    #             title="🎰 **SLOT MACHINE** 🎰",
+    #             description=self.create_slot_display(initial_grid),
+    #             color=0x9B59B6
+    #         )
+    #         embed.set_author(
+    #             name=f"{self.user.name}'s Slot Machine",
+    #             icon_url=self.user.display_avatar.url
+    #         )
+    #         embed.add_field(name="Bet Amount", value=f"{self.bet} chips", inline=True)
+    #         embed.add_field(name="Win Condition", value="**3 matching OR 2 pairs OR mixed combos**", inline=True)
+    #         embed.add_field(name="Potential Payouts", value=self.get_payout_info(), inline=False)
+    #         embed.set_footer(text="Click SPIN to start!")
+    #         return embed
+        
+    #     def create_slot_display(self, symbols_grid, winning_lines=None):
+    #         line_indicators = ["", "", ""]
+    #         if winning_lines:
+    #             for line_info in winning_lines:
+    #                 line_num = line_info['line']
+    #                 line_indicators[line_num] = " ← WIN!"
+
+    #         def format_cell(symbol):
+    #             # Add spaces around symbol to keep each cell visually same width
+    #             return f" {symbol} "
+
+    #         display = "```\n"
+    #         display += "┌───────────────┐\n"
+    #         for i in range(3):
+    #             row = f"│{format_cell(symbols_grid[i][0])}│{format_cell(symbols_grid[i][1])}│{format_cell(symbols_grid[i][2])}│"
+    #             display += f"{row}{line_indicators[i]}\n"
+    #         display += "└───────────────┘\n"
+    #         display += "```"
+    #         return display
+        
+    #     def create_final_embed(self, grid, win_type, total_winnings, winning_lines):
+    #         if win_type == "jackpot":
+    #             color = 0xFFD700  # Gold
+    #             title = "🎰 **JACKPOT!** 🎰"
+    #             footer_text = f"🎉 INCREDIBLE! You won {total_winnings} chips! 🎉"
+    #         elif win_type == "win":
+    #             color = 0x00FF00  # Green
+    #             title = "🎰 **WINNER!** 🎰"
+    #             footer_text = f"🎊 Awesome! You won {total_winnings} chips! 🎊"
+    #         else:
+    #             color = 0xFF0000  # Red
+    #             title = "🎰 **SLOT MACHINE** 🎰"
+    #             footer_text = f"😢 No luck this time! You lost {self.bet} chips."
+            
+    #         embed = discord.Embed(
+    #             title=title,
+    #             description=self.create_slot_display(grid, winning_lines),
+    #             color=color
+    #         )
+    #         embed.set_author(
+    #             name=f"{self.user.name}'s Slot Machine",
+    #             icon_url=self.user.display_avatar.url
+    #         )
+            
+    #         if winning_lines:
+    #             lines_text = ""
+    #             for line_info in winning_lines:
+    #                 line_names = ["Top", "Middle", "Bottom"]
+    #                 line_name = line_names[line_info['line']]
+    #                 symbols = " ".join(line_info['symbols'])
+    #                 lines_text += f"**{line_name}:** {symbols} (+{line_info['winnings']})\n"
+    #             embed.add_field(name="Winning Lines", value=lines_text, inline=True)
+    #             embed.add_field(name="Total Winnings", value=f"+{total_winnings} chips", inline=True)
+    #         else:
+    #             embed.add_field(name="No Wins", value="No matching lines", inline=True)
+    #             embed.add_field(name="Loss", value=f"-{self.bet} chips", inline=True)
+            
+    #         embed.set_footer(text=footer_text)
+    #         return embed
+        
+    #     def get_payout_info(self):
+    #         lines = []
+
+    #         # --- Major Wins (3 of a kind) ---
+    #         majors = {
+    #             "💎💎💎": "JACKPOT!",
+    #             "🔔🔔🔔": "Very Rare",
+    #             "🍇🍇🍇": "Rare",
+    #             "🍊🍊🍊": "Uncommon",
+    #             "🍋🍋🍋": "Common",
+    #             "🍒🍒🍒": "Most Common"
+    #         }
+    #         lines.append("**🎯 Major Wins:**")
+    #         for combo, label in majors.items():
+    #             if combo in self.payout_table:
+    #                 lines.append(f"{combo} = {self.payout_table[combo]}x ({label})")
+
+    #         # --- Mixed Combos ---
+    #         mixed = ["🍒🍒🍊", "🍒🍋🍊", "💎💎🍋", "💎💎🍊", "💎💎🍒", "🔔🔔🍒", "🔔🔔🍋"]
+    #         lines.append("\n**🎲 Mixed Combos:**")
+    #         for combo in mixed:
+    #             if combo in self.payout_table:
+    #                 lines.append(f"{combo} = {self.payout_table[combo]}x")
+
+    #         # --- Two of a Kind ---
+    #         pairs = ["💎💎", "🔔🔔", "🍇🍇", "🍊🍊", "🍋🍋", "🍒🍒"]
+    #         lines.append("\n**🎪 Two of a Kind:**")
+    #         for combo in pairs:
+    #             if combo in self.payout_table:
+    #                 lines.append(f"{combo} = {self.payout_table[combo]}x")
+
+    #         return "\n".join(lines)
+        
+    #     async def on_timeout(self):
+    #         # Disable all buttons when timeout occurs
+    #         for item in self.children:
+    #             item.disabled = True
+    #         if self.message:
+    #             embed = discord.Embed(
+    #                 title="🎰 Slot Machine Expired",
+    #                 description="This slot machine session has expired.",
+    #                 color=0x808080
+    #             )
+    #             await self.message.edit(embed=embed, view=self)
+
                 
                 
 async def setup(bot: commands.Bot):

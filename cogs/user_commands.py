@@ -11,7 +11,7 @@ import os
 logger = logging.getLogger(__name__)
 
 ROB_CHOICES = ["SUCCEED", "FAIL"]
-ROB_WEIGHTS = [0.7,0.3]
+ROB_WEIGHTS = [0.8,0.2]
 
 class UserCommands(commands.Cog):
     def __init__(self, bot):
@@ -65,6 +65,10 @@ class UserCommands(commands.Cog):
         
         
     async def bank(self, interaction: discord.Interaction, amount: int):
+        if amount <= 0:
+            await interaction.response.send_message(f"Nice try bucko, debt does not exist in this camp.")
+            
+        
         user_id = interaction.user.id
         user_name = interaction.user.name
         
@@ -195,6 +199,8 @@ class UserCommands(commands.Cog):
                 daily_cooldown = await cursor.fetchone()
                 await cursor.execute(f'SELECT hourly_cooldown FROM Users WHERE id = ?', (user_id,))
                 hourly_cooldown = await cursor.fetchone()
+                await cursor.execute(f'SELECT weekly_cooldown FROM Users WHERE id = ?', (user_id,))
+                weekly_cooldown = await cursor.fetchone()
                 
                 await connection.commit()
 
@@ -203,9 +209,11 @@ class UserCommands(commands.Cog):
         robbed_cooldown= robbed_cooldown[0]
         daily_cooldown= daily_cooldown[0]
         hourly_cooldown= hourly_cooldown[0]
+        weekly_cooldown = weekly_cooldown[0]
 
         hourly_name= "hourly_cooldown"
         daily_name= "daily_cooldown"
+        weekly_name = "weekly_cooldown"
         rob_name= "rob_cooldown"
         robbed_name= "rob_cooldown"
         
@@ -217,10 +225,9 @@ class UserCommands(commands.Cog):
         cooldown_embed.add_field(name="Candy Balance",value=f"{user_candy_amount}\n")
         cooldown_embed.add_field(name="Hourly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(hourly_name, hourly_cooldown)}\n",inline=False)
         cooldown_embed.add_field(name="Daily Cooldown",value=f"{utils_cog.convert_cooldown_into_time(daily_name, daily_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="Weekly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(weekly_name, weekly_cooldown)}\n",inline=False)
         cooldown_embed.add_field(name="Rob Cooldown",value=f"{utils_cog.convert_cooldown_into_time(rob_name, rob_cooldown)}\n",inline=False)
         cooldown_embed.add_field(name="Robbed Cooldown",value=f"{utils_cog.convert_cooldown_into_time(robbed_name, robbed_cooldown)}",inline=False)
-
-        cooldown_embed.set_field_at(index=1,name="test test", value= "test test", inline=False)
 
         await interaction.response.send_message(embed=cooldown_embed)
 
@@ -250,12 +257,13 @@ class UserCommands(commands.Cog):
         embed.add_field(name="RPS",value=f"Gamble on rock paper and scissors.\n", inline=False)
         embed.add_field(name="Coin Toss",value=f"Gamble on coin toss.\n", inline=False)
         embed.add_field(name="Blackjack",value=f"Gamble on blackjack.", inline=False)
-        embed.add_field(name="Slot Machine",value=f"Gamble on slots! The odds might be terrible or amazing I have no clue.", inline=False)
+        #embed.add_field(name="Slot Machine",value=f"Gamble on slots! The odds might be terrible or amazing I have no clue.", inline=False)
         embed.add_field(name="Roulette",value=f"Gamble on roulette!", inline=False)
         embed.add_field(name="Rob",value=f"Lets you rob another user. Be warned, you can also be robbed!\n", inline=False)
         embed.add_field(name="Cooldowns",value=f"Shows you the time left for every command and when you can be robbed next.", inline=False)
         embed.add_field(name="Store",value=f"Shows you all of the available items in the candy store/", inline=False)
         embed.add_field(name="Purchase",value=f"Buy an item from the store! Name is case sensitive.", inline=False)
+        embed.add_field(name="Interactions",value=f"Murder, make a sacrifice, etc, all unique commands you can use upon purchase from the store!", inline=False)
         embed.add_field(name="Raffles",value=f"View all currently available raffles, their ticket prices, and how many tickets have been bought!", inline=False)
         embed.add_field(name="Buy raffle tickets",value=f"Lets you buy raffle tickets", inline=False)
         embed.add_field(name="My tickets",value=f"Lets you see all of your purchased tickets", inline=False)
@@ -537,12 +545,14 @@ class UserCommands(commands.Cog):
         candy, bank, roles_json = db_result
         roles = json.loads(roles_json) if roles_json else []
         
+        avatar_bytes = await self.get_user_avatar(interaction.user)
+        
         # Create the profile image
-        profile_image = await self.create_profile_image(interaction.user, candy, bank, roles)
+        profile_image = await asyncio.to_thread(self.create_profile_image, interaction.user, candy, bank, roles, avatar_bytes)
         
         await interaction.response.send_message(file=profile_image)
 
-    async def create_profile_image(self, user, candy, bank, roles):
+    def create_profile_image(self, user, candy, bank, roles, avatar_bytes):
         
         # Card dimensions
         width, height = 800, 500
@@ -607,7 +617,7 @@ class UserCommands(commands.Cog):
             small_font = ImageFont.load_default()
         
         # Get and process user avatar
-        avatar_img = await self.get_user_avatar(user)
+        avatar_img = Image.open(BytesIO(avatar_bytes)).convert('RGBA')
         if avatar_img:
             # Resize and make circular
             avatar_size = 120
@@ -657,10 +667,10 @@ class UserCommands(commands.Cog):
         
         roles_text = "No special roles"
         if roles:
-            if len(roles) <= 3:
+            if len(roles) <= 10:
                 roles_text = ", ".join(roles)
             else:
-                roles_text = ", ".join(roles[:3]) + f" +{len(roles)-3} more"
+                roles_text = ", ".join(roles[:10]) + f" +{len(roles)-10} more"
         
         roles_content_y = roles_y + 45
         draw.text((70, roles_content_y), roles_text, fill='white', font=text_font)
@@ -685,7 +695,7 @@ class UserCommands(commands.Cog):
                 async with session.get(str(avatar_url)) as resp:
                     if resp.status == 200:
                         data = await resp.read()
-                        return Image.open(BytesIO(data)).convert('RGBA')
+                        return data
         except Exception as e:
             print(f"Failed to get avatar: {e}")
             return None
@@ -779,25 +789,29 @@ class UserCommands(commands.Cog):
                         await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
                         db_result = await cursor.fetchone()
                         db_result= db_result[0]
+                        
+                        steal_percent = (random.randint(1, 50))/100
+                        stolen_candy = int(steal_percent*db_result)
 
                         #Edge case: If user has no candy or has less than the max steal amount
                         if db_result == 0:
                             await interaction.response.send_message(f"You tried to steal candy {target.name}, but they had nothing to steal! Unlucky.")
                             return
-                        elif db_result < 200:
-                            steal = random.randint(0, db_result)
-                        else:
-                            steal = random.randint(0, 500)
-
-                        await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ? RETURNING candy', (steal, executed_time, user_id))
-                        user_candy_amount = await cursor.fetchone()
-                        user_candy_amount= user_candy_amount[0]
-                        await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ? RETURNING candy', (steal, executed_time, target_id))
+                        # elif db_result < 200: # Steal fixed amounts from users
+                        #     steal = random.randint(0, db_result)
+                        # else:
+                        #     steal = random.randint(0, 500)
+                        
+                        await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ? RETURNING candy', (stolen_candy, executed_time, target_id))
                         target_candy_amount = await cursor.fetchone()
                         target_candy_amount= target_candy_amount[0]
+                        await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ? RETURNING candy', (stolen_candy, executed_time, user_id))
+                        user_candy_amount = await cursor.fetchone()
+                        user_candy_amount= user_candy_amount[0]
                         
-                logger.info(f"DB_UPDATE: Robbed {steal} candy to user: {user_name}'s id: {user_id} from target: {target_name}'s id: {target_id}. User balance: {user_candy_amount} Target balance: {target_candy_amount}")
-                await interaction.response.send_message(f"{interaction.user.mention} stole {steal} candy from {target.mention}!")
+                        
+                logger.info(f"DB_UPDATE: Robbed {stolen_candy} candy {steal_percent}% {db_result} to user: {user_name}'s id: {user_id} from target: {target_name}'s id: {target_id}. User balance: {user_candy_amount} Target balance: {target_candy_amount}")
+                await interaction.response.send_message(f"{interaction.user.mention} stole {stolen_candy} candy from {target.mention}!")
                 
             else: #Fail logic
                 async with asqlite.connect('./database.db') as connection:
@@ -815,10 +829,11 @@ class UserCommands(commands.Cog):
                         else:
                             steal = random.randint(0, 500)
                         
-                        
+                        await cursor.execute(f'UPDATE users SET robbed_cooldown = ? WHERE id = ?', ( executed_time, target_id))
                         await cursor.execute(f'UPDATE users SET candy = candy - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
+                        
                 await interaction.response.send_message(f"You tried to steal candy from {target.name}, but you got caught! The cops beat your fucking ass and you lost {steal} candy.")        
-                logger.info(f"DB_UPDATE: Robbed fail {steal} candy from user: {user_name}'s id: {user_id}. User balance: {user_candy_amount}")
+                logger.info(f"DB_UPDATE: Robbed fail {steal} candy from user: {user_name}'s id: {user_id}. User balance: {db_result}")
                 
         elif not cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed
             await interaction.response.send_message(f"This user can't be robbed for another {utils_cog.convert_seconds_to_string(target_time_left)} hours.")
@@ -826,6 +841,162 @@ class UserCommands(commands.Cog):
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours and the user can't be robbed for {utils_cog.convert_seconds_to_string(target_time_left)} seconds.")
         else:
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} seconds.")
+            
+    @app_commands.command(name="murder", description="Use your murder interaction and kill someone!")
+    async def murder(self, interaction: discord.Interaction, target: discord.Member):
+        if target.get_role(1420045823575851118) != None:
+            await interaction.response.send_message(f"You tried to murder {target.name}, but they are already dead!", ephemeral=True)
+            return
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT murder_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                murder_count= db_result[0]
+                if murder_count == 0:
+                    await interaction.response.send_message(f"You tried to murder {target.mention}, but you havent purchased this command!", ephemeral=True)
+                    return
+                await cursor.execute(f'UPDATE users SET murder_count = murder_count - 1 WHERE id = ?', (interaction.user.id,))
+        
+        await target.add_roles(interaction.guild.get_role(1420045823575851118))
+        await interaction.response.send_message(f"You murdered {target.mention}, how brutal!", ephemeral=False)
+        
+    @app_commands.command(name="flower", description="Give a user a flower <3")
+    async def flower(self, interaction: discord.Interaction, target: discord.Member):
+        if target.get_role(1420048933647814716) != None:
+            await interaction.response.send_message(f"Someone else beat you to the punch and already gave them a flower!", ephemeral=False)
+            return
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT flower_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                flower_count= db_result[0]
+                if flower_count == 0:
+                    await interaction.response.send_message(f"You tried to give a flower to {target.mention}, but you couldn't afford it... how embarassing!", ephemeral=False)
+                    return
+                await cursor.execute(f'UPDATE users SET flower_count = flower_count - 1 WHERE id = ?', (interaction.user.id,))
+        
+        await target.add_roles(interaction.guild.get_role(1420048933647814716))
+        await interaction.response.send_message(f"You gave a flower to {target.mention}, how cute!", ephemeral=False)
+        
+    @app_commands.command(name="hero", description="Protect the user from the killer (they can still be killed by other camp goers!)")
+    async def hero(self, interaction: discord.Interaction, target: discord.Member):
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT hero_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                hero_count= db_result[0]
+                if hero_count == 0:
+                    await interaction.response.send_message(f"You tried to protect {target.name}, but you are too weak! Purchase it from the store noob.", ephemeral=True)
+                    return
+                await cursor.execute(f'UPDATE users SET hero_count = hero_count - 1 WHERE id = ?', (interaction.user.id,))
+        
+        
+        channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
+        await channel.send(f"{interaction.user.name} has used the hero interaction to protect {target.name}")
+        await interaction.response.send_message(f"You have protected {target.name}! If the killer targets them tonight, they are safe.", ephemeral=True)
+        
+    @app_commands.command(name="accusation", description="Make any accusation against another member or one of the counselors and see if you are right!")
+    async def accusation(self, interaction: discord.Interaction, target: discord.Member):
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT accusation_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                accusation_count= db_result[0]
+                if accusation_count == 0:
+                    await interaction.response.send_message(f"You tried to accuse {target.mention} of something without any evidence!", ephemeral=False)
+                    return
+                await cursor.execute(f'UPDATE users SET accusation_count = accusation_count - 1 WHERE id = ?', (interaction.user.id,))
+                
+        role = interaction.guild.get_role(1419139693232001084)
+        await interaction.response.send_message(f"You have accused {target.mention} of a serious crime! Wait for a camp counselor before preceeding.", ephemeral=False)
+        channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
+        await channel.send(f"{target.mention} has been accused by {interaction.user.mention}! {role.mention}")
+        
+    @app_commands.command(name="interrogate", description="Ask one of the counselors a line of questions they have to answer.")
+    async def interrogate(self, interaction: discord.Interaction, target: discord.Member):
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT interrogation_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                interrogate_count= db_result[0]
+                if interrogate_count == 0:
+                    await interaction.response.send_message(f"You tried to interrogate {target.mention}, but you aren't intimidating at all!", ephemeral=False)
+                    return
+                await cursor.execute(f'UPDATE users SET interrogation_count = interrogation_count - 1 WHERE id = ?', (interaction.user.id,))
+                
+        role = interaction.guild.get_role(1419139693232001084)
+        await interaction.response.send_message(f"You are interrogating {target.mention}! Lets see what they say.", ephemeral=False)
+        channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
+        await channel.send(f"{target.mention} is being interrogated by {interaction.user.mention}!")
+        
+    @app_commands.command(name="make-a-sacrifice", description="Sacrifice one member to revive another.")
+    async def makeasacrifice(self, interaction: discord.Interaction, sacrifice_target: discord.Member, revive_target: discord.Member):
+        
+        if sacrifice_target.get_role(1420045823575851118) != None:
+            await interaction.response.send_message(f"You tried to sacrifice {sacrifice_target.name}, but they are already dead!", ephemeral=True)
+            return
+        
+        if revive_target.get_role(1420045823575851118) == None:
+            await interaction.response.send_message(f"You tried to revive {revive_target.name}, but they are not dead!", ephemeral=True)
+            return
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT makeasacrifice_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                makeasacrifice_count= db_result[0]
+                if makeasacrifice_count == 0:
+                    await interaction.response.send_message(f"You tried to revive {revive_target.name}, but you don't have the correct sacrificial materials! Go purchase them.", ephemeral=True)
+                    return
+                await cursor.execute(f'UPDATE users SET makeasacrifice_count = makeasacrifice_count - 1 WHERE id = ?', (interaction.user.id,))
+                
+        role = interaction.guild.get_role(1420045823575851118) #deceased role
+        await sacrifice_target.add_roles(role)
+        await revive_target.remove_roles(role)
+        await interaction.response.send_message(f"{interaction.user.mention} sacrificied {sacrifice_target.mention}! The demon accepted your offering, and brought {revive_target.mention} back to life.", ephemeral=False)
+        
+    @app_commands.command(name="skinny-dip", description="Go skinny dipping! Don't get caught or you might get in trouble.")
+    async def skinnydip(self, interaction: discord.Interaction):
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT skinnydip_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                skinnydip_count= db_result[0]
+                if skinnydip_count == 0:
+                    await interaction.response.send_message(f"You tried to skinny dip, but your clothes seem magically stuck to you! I wonder why?", ephemeral=False)
+                    return
+                await cursor.execute(f'UPDATE users SET skinnydip_count = skinnydip_count - 1 WHERE id = ?', (interaction.user.id,))
+                
+        await interaction.response.send_message(f"{interaction.user.mention} is going skinny dipping! Lets hope no one sees you...", ephemeral=False)
+    
+    @app_commands.command(name="wedgie", description="Give someone a wedgie.")
+    async def wedgie(self, interaction: discord.Interaction, target: discord.Member):
+        
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f'SELECT wedgie_count FROM users WHERE id = ?', (interaction.user.id, ))
+                db_result = await cursor.fetchone()
+                wedgie_count= db_result[0]
+                if wedgie_count == 0:
+                    await interaction.response.send_message(f"You tried to give {target.name} a wedgie, but you are too weak!", ephemeral=False)
+                    return
+                await cursor.execute(f'UPDATE users SET wedgie_count = wedgie_count - 1 WHERE id = ?', (interaction.user.id,))
+                await cursor.execute('SELECT bank FROM users WHERE id = ?', (target.id,))
+                original_bank = (await cursor.fetchone())[0]
+                
+                loss = random.randint(10,20)*0.001
+                new_bal = int(original_bank*(1-loss))
+                await cursor.execute(f'UPDATE users SET bank = ? WHERE id = ?', (new_bal,target.id))
+                new_bank = new_bal
+                
+        await interaction.response.send_message(f"{interaction.user.mention} gave {target.mention} a wedgie! Looks like they had deposited some candy in there and lost {original_bank-new_bank}", ephemeral=False)
+        logger.info(f"DB_UPDATE: User: {target.name} id: {target.id} lost {original_bank-new_bank} candy. Old total: {original_bank} New total {new_bank}.")
 
 async def setup(bot: commands.Bot):
     

@@ -5,6 +5,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
+import asyncio
 
 #Set the path to out current working directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -49,14 +50,14 @@ def setup_logging():
     
     # Setup logging configuration
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[file_handler, console_handler]
     )
     
     # Set discord.py logging level
     discord_logger = logging.getLogger('discord')
-    discord_logger.setLevel(logging.INFO)
+    discord_logger.setLevel(logging.DEBUG)
     
     print(f"Logging to: {log_filename} (daily rotation at midnight)")
     return log_filename
@@ -78,19 +79,27 @@ async def load_database():
             # Create Users tables if doesnt exist
             create_users_table_query = '''
             CREATE TABLE IF NOT EXISTS Users (
-                id INTEGER PRIMARY KEY,
-                username TEXT NOT NULL,
-                candy INTEGER DEFAULT 0,
-                bank INTEGER DEFAULT 0,
-                rob_cooldown REAL DEFAULT 0,
-                robbed_cooldown REAL DEFAULT 0,
-                daily_cooldown REAL DEFAULT 0,
-                hourly_cooldown REAL DEFAULT 0,
-                weekly_cooldown REAL DEFAULT 0,
-                roles TEXT DEFAULT '[]',
-                bg_color TEXT DEFAULT 'purple',
-                bg_image TEXT DEFAULT NULL
-            );
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            candy INTEGER DEFAULT 0,
+            bank INTEGER DEFAULT 0,
+            rob_cooldown REAL DEFAULT 0,
+            robbed_cooldown REAL DEFAULT 0,
+            daily_cooldown REAL DEFAULT 0,
+            hourly_cooldown REAL DEFAULT 0,
+            weekly_cooldown REAL DEFAULT 0,
+            roles TEXT DEFAULT '[]',
+            bg_color TEXT DEFAULT 'purple',
+            bg_image TEXT DEFAULT NULL,
+            accusation_count INTEGER DEFAULT 0,
+            interrogation_count INTEGER DEFAULT 0,
+            wedgie_count INTEGER DEFAULT 0,
+            flower_count INTEGER DEFAULT 0,
+            skinnydip_count INTEGER DEFAULT 0,
+            murder_count INTEGER DEFAULT 0,
+            hero_count INTEGER DEFAULT 0,
+            makeasacrifice_count INTEGER DEFAULT 0
+        );
             '''
             
             await cursor.execute(create_users_table_query)
@@ -169,34 +178,26 @@ class HalloweenBot(commands.Bot):
         @commands.is_owner()
         async def sync(ctx):
             """Sync slash commands - owner only"""
-            # Send initial response immediately to avoid timeout
-            msg = await ctx.send("Starting sync...")
+            
+            logger = logging.getLogger(__name__)
+            logger.info(f"Syncing commands")
             
             # Reload all cogs
             for extension in EXTENSIONS:
                 try:
                     await self.reload_extension(extension)
                 except Exception as e:
-                    await msg.edit(content=f"Failed to reload {extension}: {e}")
+                    logger.info(f"Failed to sync commands")
                     return
             
-            # Sync commands
+            # Sync the commands
             try:
                 synced = await self.tree.sync()
-                
-                # Use asyncio-safe logging instead of print
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.info(f"Synced {len(synced)} command(s)")
                 
-                # Or if you must use print, make it non-blocking
-                import asyncio
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, print, f"Synced {len(synced)} command(s)")
-                
-                await msg.edit(content=f"✅ Synced {len(synced)} command(s)")
+                await ctx.send(f"Synced {len(synced)} command(s)")
             except Exception as e:
-                await msg.edit(content=f"Failed to sync: {e}")
+                await ctx.send(f"Failed to sync.")
                 logger.error(f"Failed to sync: {e}")
     
     def preload_images(self): 
