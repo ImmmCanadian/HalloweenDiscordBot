@@ -6,9 +6,9 @@ from discord.ext import commands
 class Utils(commands.Cog):
 
     name_reference = {
-            'weekly-candy': "weekly_cooldown",
-            'daily-candy': "daily_cooldown",
-            'hourly-candy': "hourly_cooldown",
+            'weekly': "weekly_cooldown",
+            'daily': "daily_cooldown",
+            'hourly': "hourly_cooldown",
             'rob': "rob_cooldown"
         }
 

@@ -1,4 +1,4 @@
-import discord, random, asqlite, json
+import discord, random, asqlite, json, time
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image, ImageDraw, ImageFont
@@ -51,22 +51,24 @@ class UserCommands(commands.Cog):
         else:
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours.")
 
-    @app_commands.command(name="daily-candy", description="Claim your daily candy!")
+    @app_commands.command(name="daily", description="Claim your daily candy!")
     async def dailycandy(self, interaction: discord.Interaction):
         await self.candy_cooldown(interaction)
     
-    @app_commands.command(name="hourly-candy", description="Claim your hourly candy!")
+    @app_commands.command(name="hourly", description="Claim your hourly candy!")
     async def hourlycandy(self, interaction: discord.Interaction):
         await self.candy_cooldown(interaction)
     
-    @app_commands.command(name="weekly-candy", description="Claim your weekly candy!")
+    @app_commands.command(name="weekly", description="Claim your weekly candy!")
     async def weeklycandy(self, interaction: discord.Interaction):
         await self.candy_cooldown(interaction)
         
         
     async def bank(self, interaction: discord.Interaction, amount: int):
+        
         if amount <= 0:
-            await interaction.response.send_message(f"Nice try bucko, debt does not exist in this camp.")
+            await interaction.response.send_message(f"Nice try bucko, debt does not exist in these camping grounds.")
+            return
             
         
         user_id = interaction.user.id
@@ -129,9 +131,14 @@ class UserCommands(commands.Cog):
 
         await utils_cog.check_user_exists(user_id, user_name)
         await utils_cog.check_user_exists(target_id, target_name)
+        
+        if user_id == target_id:
+            await interaction.response.send_message(f"Why are your trying this *sigh*")
+            return
 
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                await cursor.execute("BEGIN IMMEDIATE")
 
                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
                 user_candy_amount = await cursor.fetchone()
@@ -144,17 +151,19 @@ class UserCommands(commands.Cog):
                     await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ? RETURNING candy', (amount, target_id))
                     target_candy_amount = await cursor.fetchone()
                     target_candy_amount= target_candy_amount[0]
+                    await connection.commit()
                     await interaction.response.send_message(f"You gave {amount} candy to {target.mention}!")
-                    
+                else:
+                    await connection.rollback()
+                    await interaction.response.send_message(f"You dont have enough candy to do that.")
                 
                 await connection.commit()
                 logger.info(f"DB_UPDATE: Sent {amount} candy From user: {user_name}'s id: {user_id} to target: {target_name}'s id: {target_id}. User balance: {user_candy_amount} Target balance: {target_candy_amount}")
 
-        if user_candy_amount < amount:
-            await interaction.response.send_message(f"You dont have enough candy to do that.")
+        
 
-    @app_commands.command(name="balance", description="Check your candy balance.")
-    async def balance(self, interaction: discord.Interaction):
+    @app_commands.command(name="my-balance", description="Check your candy balance.")
+    async def mybalance(self, interaction: discord.Interaction):
 
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -174,6 +183,28 @@ class UserCommands(commands.Cog):
         user_candy_amount= user_candy_amount[0]
         
         await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy in your pockets. \nYou have {bank_balance} in your bank!")
+        
+    @app_commands.command(name="balance", description="Check someones balance.")
+    async def balance(self, interaction: discord.Interaction, target: discord.Member):
+
+        target_id = target.id
+        target_name = target.name
+
+        utils_cog = self.bot.get_cog("Utils")
+        await utils_cog.check_user_exists(target_id, target_name)
+
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+
+                await cursor.execute(f'SELECT candy, bank FROM Users WHERE id = ?', (target_id,))
+                target_candy_amount = await cursor.fetchone()
+                 
+                await connection.commit()
+                
+        bank_balance= target_candy_amount[1]
+        target_candy_amount= target_candy_amount[0]
+        
+        await interaction.response.send_message(f"{target_name} has {target_candy_amount} pieces of candy in their pockets. \nThey have {bank_balance} in their bank!")
 
     @app_commands.command(name="cooldowns", description="Check all of your cooldowns.")
     async def cooldowns(self, interaction: discord.Interaction):
@@ -244,7 +275,6 @@ class UserCommands(commands.Cog):
         embed = discord.Embed(title=f"Help!", description="These are all of the available user commands! If a command throws an error, make sure to read what should be entered into the field (ex. when purchasing item_name is case sensitive)", color=0x9B59B6)
         embed.set_author(
             name=f"{user.name}",
-            
             icon_url=user.display_avatar.url)
 
         embed.add_field(name="Profile",value=f"Shows your profile.\n",inline=False)
@@ -758,7 +788,7 @@ class UserCommands(commands.Cog):
 
     @app_commands.command(name="rob", description="Steal someones candy!")
     async def rob(self, interaction: discord.Interaction, target: discord.Member):
-
+        
         user_id = interaction.user.id
         user_name = interaction.user.name
         target_id = target.id
@@ -785,6 +815,7 @@ class UserCommands(commands.Cog):
             if bot_choice == "SUCCEED":
                 async with asqlite.connect('./database.db') as connection:
                     async with connection.cursor() as cursor:
+                        
 
                         await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
                         db_result = await cursor.fetchone()
@@ -808,6 +839,8 @@ class UserCommands(commands.Cog):
                         await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ? RETURNING candy', (stolen_candy, executed_time, user_id))
                         user_candy_amount = await cursor.fetchone()
                         user_candy_amount= user_candy_amount[0]
+                        
+                        await connection.commit()
                         
                         
                 logger.info(f"DB_UPDATE: Robbed {stolen_candy} candy {steal_percent}% {db_result} to user: {user_name}'s id: {user_id} from target: {target_name}'s id: {target_id}. User balance: {user_candy_amount} Target balance: {target_candy_amount}")
@@ -841,11 +874,17 @@ class UserCommands(commands.Cog):
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours and the user can't be robbed for {utils_cog.convert_seconds_to_string(target_time_left)} seconds.")
         else:
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} seconds.")
+        
+        
             
     @app_commands.command(name="murder", description="Use your murder interaction and kill someone!")
     async def murder(self, interaction: discord.Interaction, target: discord.Member):
         if target.get_role(1420045823575851118) != None:
             await interaction.response.send_message(f"You tried to murder {target.name}, but they are already dead!", ephemeral=True)
+            return
+        
+        if interaction.user.id == target.id:
+            await interaction.response.send_message(f"You can't commit suicide bucko.")
             return
         
         async with asqlite.connect('./database.db') as connection:
@@ -865,6 +904,10 @@ class UserCommands(commands.Cog):
     async def flower(self, interaction: discord.Interaction, target: discord.Member):
         if target.get_role(1420048933647814716) != None:
             await interaction.response.send_message(f"Someone else beat you to the punch and already gave them a flower!", ephemeral=False)
+            return
+        
+        if interaction.user.id == target.id:
+            await interaction.response.send_message(f"Trying to give a flower to yourself... how sad :(.")
             return
         
         async with asqlite.connect('./database.db') as connection:
@@ -901,6 +944,10 @@ class UserCommands(commands.Cog):
     @app_commands.command(name="accusation", description="Make any accusation against another member or one of the counselors and see if you are right!")
     async def accusation(self, interaction: discord.Interaction, target: discord.Member):
         
+        if interaction.user.id == target.id:
+            await interaction.response.send_message(f"Just look in a mirror.")
+            return
+        
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(f'SELECT accusation_count FROM users WHERE id = ?', (interaction.user.id, ))
@@ -918,6 +965,10 @@ class UserCommands(commands.Cog):
         
     @app_commands.command(name="interrogate", description="Ask one of the counselors a line of questions they have to answer.")
     async def interrogate(self, interaction: discord.Interaction, target: discord.Member):
+        
+        if interaction.user.id == target.id:
+            await interaction.response.send_message(f"You can't interrogate yourself goofy.")
+            return
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
