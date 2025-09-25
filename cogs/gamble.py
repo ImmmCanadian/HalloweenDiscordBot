@@ -1,10 +1,8 @@
-import discord, random, asyncio, asqlite
+import discord, random, asyncio, asqlite, platform, logging, io
 from discord.ext import commands
 from discord import app_commands, File
 from discord.ui import Button, View
 from PIL import Image, ImageDraw, ImageFont
-import io
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -423,12 +421,20 @@ class Gamble(commands.Cog):
             draw = ImageDraw.Draw(img)
             
             try:
-                # Try to use a better font
-                title_font = ImageFont.truetype("arial.ttf", 36)
-                card_font = ImageFont.truetype("arial.ttf", 24)
-                text_font = ImageFont.truetype("arial.ttf", 20)
+                # Use DejaVu fonts on Linux - they have better Unicode support for card symbols
+                
+                if platform.system() == "Linux":
+                    # DejaVu has excellent Unicode support for card suits ♠♥♦♣
+                    title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+                    card_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)  
+                    text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)  
+                else:
+                    # Windows/Mac fonts
+                    title_font = ImageFont.truetype("arial.ttf", 48)
+                    card_font = ImageFont.truetype("arial.ttf", 32)
+                    text_font = ImageFont.truetype("arial.ttf", 28)
             except:
-                # Fallback to default font
+                # Fallback to default font but with bigger size multiplier
                 title_font = ImageFont.load_default()
                 card_font = ImageFont.load_default()
                 text_font = ImageFont.load_default()

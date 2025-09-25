@@ -1,12 +1,9 @@
-import discord, random, asqlite, json, time
+import discord, random, asqlite, json, platform, logging, aiohttp, io, asyncio
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
-import aiohttp, io, asyncio
-import logging
 from pathlib import Path
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -618,28 +615,28 @@ class UserCommands(commands.Cog):
             print(f"Failed to load background image: {e}")
             draw.rectangle([0, 0, width, height], fill=(30, 30, 40))
         
-        # Load fonts - try multiple font paths for better compatibility
         try:
-            # Try different font paths depending on OS
-            import platform
+            
             system = platform.system()
             
             if system == "Windows":
-                title_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 36)
-                header_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 24)
-                text_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 20)
-                small_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 16)
+                title_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 42)  # Increased
+                header_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 30)  # Increased
+                text_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 26)  # Increased
+                small_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 20)  # Increased
             elif system == "Linux":
-                title_font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 36)
-                header_font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 24)
-                text_font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 20)
-                small_font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 16)
+                # Use DejaVu instead of Liberation for better Unicode support
+                title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 42)
+                header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
+                text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 26)
+                small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
             else:  # macOS
-                title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
-                header_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
-                text_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
-                small_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
-        except:
+                title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 42)
+                header_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 30)
+                text_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 26)
+                small_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
+        except Exception as e:
+            print(f"Font loading error: {e}")
             # Fallback to default fonts
             title_font = ImageFont.load_default()
             header_font = ImageFont.load_default()
