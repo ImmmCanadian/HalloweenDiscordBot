@@ -13,7 +13,7 @@ os.chdir(script_dir)
 
 #Load our token
 load_dotenv('secret.env')
-token = os.getenv('token')
+token = os.getenv('TOKEN')
 
 intents = discord.Intents.none()
 intents.members = True
