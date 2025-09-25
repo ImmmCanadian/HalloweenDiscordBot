@@ -422,7 +422,6 @@ class Gamble(commands.Cog):
             
             try:
                 # Use DejaVu fonts on Linux - they have better Unicode support for card symbols
-                
                 if platform.system() == "Linux":
                     # DejaVu has excellent Unicode support for card suits ♠♥♦♣
                     title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
@@ -439,8 +438,15 @@ class Gamble(commands.Cog):
                 card_font = ImageFont.load_default()
                 text_font = ImageFont.load_default()
             
-            # Title
-            draw.text((width//2 - 100, 30), "BLACKJACK", fill='white', font=title_font)
+            # Helper function to center text
+            def draw_centered_text(text, y, font, fill='white'):
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                x = (width - text_width) // 2
+                draw.text((x, y), text, fill=fill, font=font)
+            
+            # Title - PROPERLY CENTERED
+            draw_centered_text("BLACKJACK", 30, title_font)
             
             # Dealer section
             dealer_y = 120
@@ -469,26 +475,29 @@ class Gamble(commands.Cog):
                 self.draw_card_face(draw, card, card_x, player_y + 30, card_font)
                 card_x += 120
             
-            # Game status
+            # Game status - ALL PROPERLY CENTERED
             status_y = 520
             if self.game_state == "Blackjack":
-                draw.text((width//2 - 80, status_y), "BLACKJACK!", fill='gold', font=text_font)
+                draw_centered_text("BLACKJACK!", status_y, text_font, 'gold')
             elif self.game_state == "Bust":
-                draw.text((width//2 - 50, status_y), "BUST!", fill='red', font=text_font)
+                draw_centered_text("BUST!", status_y, text_font, 'red')
             elif self.game_state == "Timeout":
-                draw.text((width//2 - 100, status_y), "TIMEOUT - YOU LOSE!", fill='red', font=text_font)
+                draw_centered_text("TIMEOUT - YOU LOSE!", status_y, text_font, 'red')
             elif self.game_over:
                 if self.dealer_total > 21:
-                    draw.text((width//2 - 80, status_y), "DEALER BUST!", fill='gold', font=text_font)
+                    draw_centered_text("DEALER BUST!", status_y, text_font, 'gold')
                 elif self.user_total > self.dealer_total:
-                    draw.text((width//2 - 50, status_y), "YOU WIN!", fill='gold', font=text_font)
+                    draw_centered_text("YOU WIN!", status_y, text_font, 'gold')
                 elif self.user_total == self.dealer_total:
-                    draw.text((width//2 - 30, status_y), "PUSH", fill='yellow', font=text_font)
+                    draw_centered_text("PUSH", status_y, text_font, 'yellow')
                 else:
-                    draw.text((width//2 - 60, status_y), "DEALER WINS", fill='red', font=text_font)
+                    draw_centered_text("DEALER WINS", status_y, text_font, 'red')
             
-            # Bet amount
-            draw.text((width - 200, 50), f"Bet: {self.bet}", fill='white', font=text_font)
+            # Bet amount (right-aligned)
+            bet_text = f"Bet: {self.bet}"
+            bbox = draw.textbbox((0, 0), bet_text, font=text_font)
+            bet_width = bbox[2] - bbox[0]
+            draw.text((width - bet_width - 20, 50), bet_text, fill='white', font=text_font)
             
             # Convert to Discord file
             buffer = io.BytesIO()
