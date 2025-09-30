@@ -9,6 +9,15 @@ logger = logging.getLogger(__name__)
 
 ROB_CHOICES = ["SUCCEED", "FAIL"]
 ROB_WEIGHTS = [0.8,0.2]
+WEAPON_ROLE_IDS = {
+    1421374048700596305,  
+    1421374098109497444,
+    1421374134331375697,
+    1421374287230533662,
+    1421374308336402452,
+    1421374343178620938,
+    1421374395401895946
+}
 
 class UserCommands(commands.Cog):
     def __init__(self, bot):
@@ -30,11 +39,11 @@ class UserCommands(commands.Cog):
         if not cooldown_data['user_on_cooldown']:
 
             if cooldown_name == "daily_cooldown":
-                reward = random.randint(1000, 2000)
+                reward = random.randint(2000, 4000)
             elif cooldown_name == "weekly_cooldown":
-                reward = random.randint(5000, 10000)
+                reward = random.randint(10000, 20000)
             else:
-                reward = random.randint(100, 200)
+                reward = random.randint(200, 400)
 
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
@@ -121,8 +130,10 @@ class UserCommands(commands.Cog):
 
         user_id = interaction.user.id
         user_name = interaction.user.name
+        
         target_id = target.id
         target_name = target.name
+        
 
         utils_cog = self.bot.get_cog("Utils")
 
@@ -186,6 +197,7 @@ class UserCommands(commands.Cog):
 
         target_id = target.id
         target_name = target.name
+        target_display = target.display_name
 
         utils_cog = self.bot.get_cog("Utils")
         await utils_cog.check_user_exists(target_id, target_name)
@@ -201,7 +213,7 @@ class UserCommands(commands.Cog):
         bank_balance= target_candy_amount[1]
         target_candy_amount= target_candy_amount[0]
         
-        await interaction.response.send_message(f"{target_name} has {target_candy_amount} pieces of candy in their pockets. \nThey have {bank_balance} in their bank!")
+        await interaction.response.send_message(f"{target_display} has {target_candy_amount} pieces of candy in their pockets. \nThey have {bank_balance} in their bank!")
 
     @app_commands.command(name="cooldowns", description="Check all of your cooldowns.")
     async def cooldowns(self, interaction: discord.Interaction):
@@ -247,7 +259,7 @@ class UserCommands(commands.Cog):
         
         cooldown_embed = discord.Embed(title=f"Command Cooldowns", color=0x9B59B6)
         cooldown_embed.set_author(
-            name=f"{user.name}",
+            name=f"{user.display_name}",
             icon_url=user.display_avatar.url)
             
         cooldown_embed.add_field(name="Candy Balance",value=f"{user_candy_amount}\n")
@@ -271,7 +283,7 @@ class UserCommands(commands.Cog):
 
         embed = discord.Embed(title=f"Help!", description="These are all of the available user commands! If a command throws an error, make sure to read what should be entered into the field (ex. when purchasing item_name is case sensitive)", color=0x9B59B6)
         embed.set_author(
-            name=f"{user.name}",
+            name=f"{user.display_name}",
             icon_url=user.display_avatar.url)
 
         embed.add_field(name="Profile",value=f"Shows your profile.\n",inline=False)
@@ -290,7 +302,7 @@ class UserCommands(commands.Cog):
         embed.add_field(name="Cooldowns",value=f"Shows you the time left for every command and when you can be robbed next.", inline=False)
         embed.add_field(name="Store",value=f"Shows you all of the available items in the candy store/", inline=False)
         embed.add_field(name="Purchase",value=f"Buy an item from the store! Name is case sensitive.", inline=False)
-        embed.add_field(name="Interactions",value=f"Murder, make a sacrifice, etc, all unique commands you can use upon purchase from the store!", inline=False)
+        embed.add_field(name="Interactions",value=f"Murder, make a sacrifice, etc, all unique commands you can use upon purchase from the store!\n Hint: Make sure you are prepared before trying to murder someone ;)", inline=False)
         embed.add_field(name="Raffles",value=f"View all currently available raffles, their ticket prices, and how many tickets have been bought!", inline=False)
         embed.add_field(name="Buy raffle tickets",value=f"Lets you buy raffle tickets", inline=False)
         embed.add_field(name="My tickets",value=f"Lets you see all of your purchased tickets", inline=False)
@@ -620,15 +632,15 @@ class UserCommands(commands.Cog):
             system = platform.system()
             
             if system == "Windows":
-                title_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 42)  # Increased
-                header_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 30)  # Increased
-                text_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 26)  # Increased
+                title_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 38)  # Increased
+                header_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 26)  # Increased
+                text_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 22)  # Increased
                 small_font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 20)  # Increased
             elif system == "Linux":
                 # Use DejaVu instead of Liberation for better Unicode support
-                title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 42)
-                header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
-                text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 26)
+                title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 38)
+                header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
+                text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 22)
                 small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
             else:  # macOS
                 title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 42)
@@ -794,6 +806,12 @@ class UserCommands(commands.Cog):
         if user_id == target_id:
             await interaction.response.send_message(f"You can't rob yourself goofy.")
             return
+        
+        is_admin = target.get_role(637868242932858911)
+        
+        if is_admin != None:
+            await interaction.response.send_message(f"You can't rob a camp counsellor!", ephemeral=True)
+            return
 
         utils_cog = self.bot.get_cog("Utils")
 
@@ -852,7 +870,7 @@ class UserCommands(commands.Cog):
 
                         #Edge case: If user has no candy or has less than the max steal amount
                         if db_result == 0:
-                            await interaction.response.send_message(f"You tried to steal candy from {target.name}, but you got caught! Luckily, you are poor and have nothing to lose.")
+                            await interaction.response.send_message(f"You tried to steal candy from {target.mention}, but you got caught! Luckily, you are poor and have nothing to lose.")
                             return
                         elif db_result < 200:
                             steal = random.randint(0, db_result)
@@ -862,7 +880,7 @@ class UserCommands(commands.Cog):
                         await cursor.execute(f'UPDATE users SET robbed_cooldown = ? WHERE id = ?', ( executed_time, target_id))
                         await cursor.execute(f'UPDATE users SET candy = candy - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
                         
-                await interaction.response.send_message(f"You tried to steal candy from {target.name}, but you got caught! The cops beat your fucking ass and you lost {steal} candy.")        
+                await interaction.response.send_message(f"You tried to steal candy from {target.mention}, but you got caught! The cops beat your fucking ass and you lost {steal} candy.")        
                 logger.info(f"DB_UPDATE: Robbed fail {steal} candy from user: {user_name}'s id: {user_id}. User balance: {db_result}")
                 
         elif not cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed
@@ -876,7 +894,7 @@ class UserCommands(commands.Cog):
             
     @app_commands.command(name="murder", description="Use your murder interaction and kill someone!")
     async def murder(self, interaction: discord.Interaction, target: discord.Member):
-        if target.get_role(1420045823575851118) != None:
+        if target.get_role(1421440686946783292) != None:
             await interaction.response.send_message(f"You tried to murder {target.name}, but they are already dead!", ephemeral=True)
             return
         
@@ -893,9 +911,18 @@ class UserCommands(commands.Cog):
                     await interaction.response.send_message(f"You tried to murder {target.mention}, but you havent purchased this command!", ephemeral=True)
                     return
                 await cursor.execute(f'UPDATE users SET murder_count = murder_count - 1 WHERE id = ?', (interaction.user.id,))
+                
+        user_role_ids = {role.id for role in interaction.user.roles}
+        has_weapon = bool(WEAPON_ROLE_IDS & user_role_ids)
         
-        await target.add_roles(interaction.guild.get_role(1420045823575851118))
-        await interaction.response.send_message(f"You murdered {target.mention}, how brutal!", ephemeral=False)
+        if has_weapon:
+            await target.add_roles(interaction.guild.get_role(1421440686946783292))
+            await interaction.response.send_message(f"You murdered {target.mention}, how brutal!", ephemeral=False)
+        else:
+            role = interaction.guild.get_role(637868242932858911)
+            channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
+            await channel.send(f"{interaction.user.name} tried to murder {target.name} but failed! {role.mention}")
+            await interaction.response.send_message(f"{interaction.user.mention} approached {target.mention} attempting to kill them! But since they forgot to buy a weapon, {target.display_name} managed to escape and alert the camp counsellors!", ephemeral=False)
         
     @app_commands.command(name="flower", description="Give a user a flower <3")
     async def flower(self, interaction: discord.Interaction, target: discord.Member):
@@ -917,7 +944,7 @@ class UserCommands(commands.Cog):
                     return
                 await cursor.execute(f'UPDATE users SET flower_count = flower_count - 1 WHERE id = ?', (interaction.user.id,))
         
-        await target.add_roles(interaction.guild.get_role(1420048933647814716))
+        await target.add_roles(interaction.guild.get_role(1421971324221526149))
         await interaction.response.send_message(f"You gave a flower to {target.mention}, how cute!", ephemeral=False)
         
     @app_commands.command(name="hero", description="Protect the user from the killer (they can still be killed by other camp goers!)")
@@ -929,14 +956,15 @@ class UserCommands(commands.Cog):
                 db_result = await cursor.fetchone()
                 hero_count= db_result[0]
                 if hero_count == 0:
-                    await interaction.response.send_message(f"You tried to protect {target.name}, but you are too weak! Purchase it from the store noob.", ephemeral=True)
+                    await interaction.response.send_message(f"You tried to protect {target.display_name}, but you are too weak! Purchase it from the store noob.", ephemeral=True)
                     return
                 await cursor.execute(f'UPDATE users SET hero_count = hero_count - 1 WHERE id = ?', (interaction.user.id,))
         
-        
+        role = interaction.guild.get_role(637868242932858911)
         channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
-        await channel.send(f"{interaction.user.name} has used the hero interaction to protect {target.name}")
-        await interaction.response.send_message(f"You have protected {target.name}! If the killer targets them tonight, they are safe.", ephemeral=True)
+        await channel.send(f"{interaction.user.name} has used the hero interaction to protect {target.name} {role.mention}")
+        
+        await interaction.response.send_message(f"You have protected {target.display_name}! If the killer targets them tonight, they are safe.", ephemeral=True)
         
     @app_commands.command(name="accusation", description="Make any accusation against another member or one of the counselors and see if you are right!")
     async def accusation(self, interaction: discord.Interaction, target: discord.Member):
@@ -955,7 +983,7 @@ class UserCommands(commands.Cog):
                     return
                 await cursor.execute(f'UPDATE users SET accusation_count = accusation_count - 1 WHERE id = ?', (interaction.user.id,))
                 
-        role = interaction.guild.get_role(1419139693232001084)
+        role = interaction.guild.get_role(637868242932858911)
         await interaction.response.send_message(f"You have accused {target.mention} of a serious crime! Wait for a camp counselor before preceeding.", ephemeral=False)
         channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
         await channel.send(f"{target.mention} has been accused by {interaction.user.mention}! {role.mention}")
@@ -977,7 +1005,7 @@ class UserCommands(commands.Cog):
                     return
                 await cursor.execute(f'UPDATE users SET interrogation_count = interrogation_count - 1 WHERE id = ?', (interaction.user.id,))
                 
-        role = interaction.guild.get_role(1419139693232001084)
+        role = interaction.guild.get_role(637868242932858911)
         await interaction.response.send_message(f"You are interrogating {target.mention}! Lets see what they say.", ephemeral=False)
         channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
         await channel.send(f"{target.mention} is being interrogated by {interaction.user.mention}!")
@@ -985,11 +1013,11 @@ class UserCommands(commands.Cog):
     @app_commands.command(name="make-a-sacrifice", description="Sacrifice one member to revive another.")
     async def makeasacrifice(self, interaction: discord.Interaction, sacrifice_target: discord.Member, revive_target: discord.Member):
         
-        if sacrifice_target.get_role(1420045823575851118) != None:
+        if sacrifice_target.get_role(1421440686946783292) != None:
             await interaction.response.send_message(f"You tried to sacrifice {sacrifice_target.name}, but they are already dead!", ephemeral=True)
             return
         
-        if revive_target.get_role(1420045823575851118) == None:
+        if revive_target.get_role(1421440686946783292) == None:
             await interaction.response.send_message(f"You tried to revive {revive_target.name}, but they are not dead!", ephemeral=True)
             return
         
@@ -1003,7 +1031,7 @@ class UserCommands(commands.Cog):
                     return
                 await cursor.execute(f'UPDATE users SET makeasacrifice_count = makeasacrifice_count - 1 WHERE id = ?', (interaction.user.id,))
                 
-        role = interaction.guild.get_role(1420045823575851118) #deceased role
+        role = interaction.guild.get_role(1421440686946783292) #deceased role
         await sacrifice_target.add_roles(role)
         await revive_target.remove_roles(role)
         await interaction.response.send_message(f"{interaction.user.mention} sacrificied {sacrifice_target.mention}! The demon accepted your offering, and brought {revive_target.mention} back to life.", ephemeral=False)

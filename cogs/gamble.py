@@ -107,7 +107,7 @@ class Gamble(commands.Cog):
                 color=0x9B59B6
             )
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             embed.set_footer(text="Choose your move!")
@@ -116,7 +116,7 @@ class Gamble(commands.Cog):
         def create_embed(self, user_choice, bot_choice, result, winnings=0):
             embed = discord.Embed(title=f"Rock Paper Scissors!", description=f"You: {RPS_SYMBOLS[user_choice]}      Bot: {RPS_SYMBOLS[bot_choice]}.", color=0x9B59B6)
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url)
 
             if result == "tie":
@@ -224,7 +224,7 @@ class Gamble(commands.Cog):
         def create_initial_embed(self):
             embed = discord.Embed(title=f"Coin toss!", description=f"Make your choice!.", color=0x9B59B6)
             embed.set_author(
-            name=f"{self.user.name}",
+            name=f"{self.user.display_name}",
             icon_url=self.user.display_avatar.url)
 
             embed.set_image(url=f"attachment://start.png")
@@ -235,7 +235,7 @@ class Gamble(commands.Cog):
         def create_gif_embed(self, bot_pick):
             embed = discord.Embed(title=f"Coin toss!", description=f"Flipping!", color=0x9B59B6)
             embed.set_author(
-            name=f"{self.user.name}",
+            name=f"{self.user.display_name}",
             icon_url=self.user.display_avatar.url)
 
             embed.set_image(url=f"attachment://{bot_pick}.gif")
@@ -247,7 +247,7 @@ class Gamble(commands.Cog):
             
             embed = discord.Embed(title=f"Coin toss!", description=f"Result:", color=0x9B59B6)
             embed.set_author(
-            name=f"{self.user.name}",
+            name=f"{self.user.display_name}",
             icon_url=self.user.display_avatar.url)
             
             embed.set_image(url=f"attachment://end-{choice}.webp")
@@ -426,7 +426,7 @@ class Gamble(commands.Cog):
                     # DejaVu has excellent Unicode support for card suits ♠♥♦♣
                     title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
                     card_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)  
-                    text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)  
+                    text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24)  
                 else:
                     # Windows/Mac fonts
                     title_font = ImageFont.truetype("arial.ttf", 48)
@@ -534,7 +534,7 @@ class Gamble(commands.Cog):
                 suit_width, suit_height = font.getsize(suit)
             
             # Draw rank in top-left corner
-            draw.text((x + 10, y + 10), rank, fill=color, font=font)
+            draw.text((x + 10, y + 5), rank, fill=color, font=font)
             
             # Draw large centered suit symbol
             suit_x = x + (100 - suit_width) // 2
@@ -543,7 +543,7 @@ class Gamble(commands.Cog):
             
             # Draw rank in bottom-right corner (upside down style)
             rank_x = x + 100 - rank_width - 10
-            rank_y = y + 140 - rank_height - 10
+            rank_y = y + 135 - rank_height - 10
             draw.text((rank_x, rank_y), rank, fill=color, font=font)
         
         async def create_embed(self):
@@ -552,7 +552,7 @@ class Gamble(commands.Cog):
                 color=0x00ff00 if self.game_over and self.game_state not in ["Bust", "Timeout"] else 0x9B59B6
             )
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             
@@ -800,7 +800,7 @@ class Gamble(commands.Cog):
                 color=0xFFD700
             )
             first_embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             await interaction.response.edit_message(embed=first_embed, view=self)
@@ -839,7 +839,7 @@ class Gamble(commands.Cog):
                     color=0xFFD700
                 )
                 embed.set_author(
-                    name=f"{self.user.name}",
+                    name=f"{self.user.display_name}",
                     icon_url=self.user.display_avatar.url
                 )
                 embed.add_field(name="Your Bet", value=f"{self.bet} candy on {self.get_color_emoji(self.color)} {self.color.upper()}", inline=False)
@@ -927,7 +927,7 @@ class Gamble(commands.Cog):
                 color=self.get_embed_color(self.color)
             )
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             embed.add_field(name="Your Bet", value=f"{self.bet} candy", inline=True)
@@ -952,7 +952,7 @@ class Gamble(commands.Cog):
                 color=0x2ECC71
             )
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             embed.add_field(name="You Bet", value=f"{self.get_color_emoji(self.color)} {self.color.upper()}", inline=True)
@@ -974,7 +974,7 @@ class Gamble(commands.Cog):
                 color=0xE74C3C
             )
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             embed.add_field(name="You Bet", value=f"{self.get_color_emoji(self.color)} {self.color.upper()}", inline=True)
@@ -1006,7 +1006,7 @@ class Gamble(commands.Cog):
                 color=color
             )
             embed.set_author(
-                name=f"{self.user.name}",
+                name=f"{self.user.display_name}",
                 icon_url=self.user.display_avatar.url
             )
             

@@ -16,7 +16,7 @@ class Store(commands.Cog):
     @app_commands.command(name="add-store-item", description="Add an item to the store or add more quantity.")
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
-        role="Either put the role name without the @ (Ex. Crackhead) or put None (Not a role)", 
+        role="Put the role id (right click role in role list) or put None (Not a role)", 
         category="Select the item category"
     )
     @app_commands.choices(category=[
@@ -36,12 +36,21 @@ class Store(commands.Cog):
         if role.lower() != "none":
             role_obj = None
             
-            # Try exact match first (case insensitive)
-            role_obj = discord.utils.find(lambda r: r.name.lower() == role.lower(), interaction.guild.roles)
-            
-            if role_obj is None:
-                await interaction.followup.send("This role doesn't exist in the server. Please create the role before trying to add it to the store.", ephemeral=True)
+            try:
+                # Convert role input to integer (role IDs are integers)
+                role_id = int(role)
+                
+                # Get role by ID
+                role_obj = interaction.guild.get_role(role_id)
+                
+                if role_obj is None:
+                    await interaction.followup.send("This role doesn't exist in the server. Please check the role ID and try again.", ephemeral=True)
+                    return
+                    
+            except ValueError:
+                await interaction.followup.send("Invalid role ID. Please provide a valid role ID (numbers only).", ephemeral=True)
                 return
+            
             role_id = role_obj.id
 
         if quantity <= 0:
@@ -114,10 +123,10 @@ class Store(commands.Cog):
     async def purchase(self, interaction: discord.Interaction, item_name: str, quantity: int):
 
         if quantity == 0:
-            await interaction.response.send_message(f"This brokie {interaction.user.name} just tried to buy 0 quantity of an item.", ephemeral = False)
+            await interaction.response.send_message(f"This brokie {interaction.user.display_name} just tried to buy 0 or less quantity of an item.", ephemeral = False)
             return
 
-
+        item_name = item_name.strip().lower()
         user_id = interaction.user.id
         user_name = interaction.user.name
 
@@ -312,7 +321,7 @@ class Store(commands.Cog):
                 description="\u200b\n" + "```"+"\n".join([header] + store_lines)+"```"+"\u200b\n",
                 color=discord.Color.purple()
             )
-            embed.set_author(name=f"{self.user.name}'s Store", icon_url=self.user.display_avatar.url)
+            embed.set_author(name=f"{self.user.display_name}'s Store", icon_url=self.user.display_avatar.url)
             embed.set_footer(text=f"Page {self.page + 1} of {self.max_page + 1} | Category: {self.selected_category}")
             embed.set_thumbnail(url="https://images.halloweencostumes.com.au/products/12290/1-1/light-up-traditional-pumpkin-upd.jpg")
             return embed

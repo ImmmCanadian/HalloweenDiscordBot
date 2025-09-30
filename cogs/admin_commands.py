@@ -13,6 +13,10 @@ class AdminCommands(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def givecandy(self, interaction: discord.Interaction , target: discord.Member, amount: int):
         
+        if amount < 0:
+            await interaction.response.send_message("You cannot give a negative amount of candy!", ephemeral=True)
+            return
+        
         target_id = target.id
         target_name = target.name
 
@@ -23,7 +27,7 @@ class AdminCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
-                await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ? RETURNING candy', (amount, target.id))
+                await cursor.execute(f'UPDATE users SET bank = bank + ? WHERE id = ? RETURNING candy', (amount, target.id))
                 new_candy_amount = await cursor.fetchone()
                 await connection.commit()
                 
@@ -33,6 +37,10 @@ class AdminCommands(commands.Cog):
     @app_commands.command(name="remove-candy", description="Take a users candy.")
     @app_commands.default_permissions(administrator=True)
     async def removecandy(self, interaction: discord.Interaction , target: discord.Member, amount: int):
+        
+        if amount < 0:
+            await interaction.response.send_message("You cannot remove a negative amount of candy!", ephemeral=True)
+            return
 
         target_id = target.id
         target_name = target.name

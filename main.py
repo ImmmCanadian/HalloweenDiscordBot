@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 import asyncio
+from datetime import date
 
 #Set the path to out current working directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,39 +28,43 @@ def setup_logging():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     
-    # Base log filename (rotation will add dates automatically)
-    log_filename = os.path.join(log_dir, 'discord_bot.log')
+    # Use dated filename from the start
+    today = datetime.now().strftime('%Y-%m-%d')
+    log_filename = os.path.join(log_dir, f'discord_bot_{today}.log')
     
-    # Create timed rotating file handler
-    # when='midnight' rotates at midnight (12:00 AM)
-    # interval=1 means every 1 day
-    # backupCount=30 keeps 30 days of logs
-    file_handler = TimedRotatingFileHandler(
+    # Clear any existing handlers first
+    logger = logging.getLogger()
+    logger.handlers.clear()
+    
+    # Create file handler (append mode)
+    file_handler = logging.FileHandler(
         log_filename,
-        when='midnight',
-        interval=1,
-        backupCount=30,
-        encoding='utf-8'
+        encoding='utf-8',
+        mode='a'  # Append, don't overwrite
     )
     
-    # Set the suffix for rotated files (YYYY-MM-DD format)
-    file_handler.suffix = '%Y-%m-%d'
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
     
     # Console handler
     console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
     
-    # Setup logging configuration
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[file_handler, console_handler]
-    )
+    # Configure root logger
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
     
-    # Set discord.py logging level
+    # Configure discord logger
     discord_logger = logging.getLogger('discord')
     discord_logger.setLevel(logging.DEBUG)
+    discord_logger.propagate = True
     
-    print(f"Logging to: {log_filename} (daily rotation at midnight)")
+    logger.info(f"Logging to {log_filename}")
+    
     return log_filename
 
 # Setup logging
@@ -160,7 +165,7 @@ async def load_database():
 class HalloweenBot(commands.Bot):
     
     def __init__(self):
-        super().__init__(command_prefix='?', intents=intents)
+        super().__init__(command_prefix=';', intents=intents)
         self.image_cache = {}
     
     async def setup_hook(self):
