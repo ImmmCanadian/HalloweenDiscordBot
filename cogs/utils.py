@@ -17,6 +17,7 @@ class Utils(commands.Cog):
         now = datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
         return now > cutoff
 
+    # Map slash command names to the database column that stores the cooldown timestamp
     name_reference = {
             'weekly': "weekly_cooldown",
             'daily': "daily_cooldown",
@@ -24,6 +25,7 @@ class Utils(commands.Cog):
             'rob': "rob_cooldown"
         }
 
+    # Duration in seconds for each cooldown column
     time_reference = {
             'weekly_cooldown': 604800,
             'daily_cooldown': 86400,
@@ -48,7 +50,7 @@ class Utils(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
                 
-                #Returns None if user does not exist in our DB
+                # Look up the user row and create it when missing
                 await cursor.execute('SELECT * FROM Users WHERE id = ?', (user_id,))
                 result = await cursor.fetchone()
 
@@ -79,12 +81,14 @@ class Utils(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
                 
+                # Load the caller's cooldown timestamp for the requested command
                 await cursor.execute(f'SELECT {cooldown_name} FROM Users WHERE id = ?', (user_id,))
                 db_result = await cursor.fetchone()
 
                 #Logic for checking if target has been robbed and is on cooldown
                 target_result = None
                 if target != None and cooldown_name == "rob_cooldown":
+                    # Pull the target's robbed cooldown to enforce protection windows
                     await cursor.execute(f'SELECT robbed_cooldown FROM Users WHERE id = ?', (target.id,))
                     target_result = await cursor.fetchone()
                     target_result = target_result[0] if target_result else 0

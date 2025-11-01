@@ -28,6 +28,7 @@ class AdminCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
+                # Credit the user's bank balance while returning the new totals for logging
                 await cursor.execute(f'UPDATE users SET bank = bank + ? WHERE id = ? RETURNING candy', (amount, target.id))
                 await cursor.execute(f'UPDATE users SET bank = bank + ? WHERE id = ? RETURNING candy', (amount, target.id))
                 new_candy_amount = await cursor.fetchone()
@@ -55,12 +56,14 @@ class AdminCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
+                # Remove candy from pockets first before reconciling any negative remainder
                 await cursor.execute(f'UPDATE Users SET candy = candy - ? WHERE id = ?', (amount, target.id))
                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target.id,))
                 current_candy = await cursor.fetchone()
                 current_candy = current_candy[0]
                 
                 if current_candy < 0:
+                    # Reset pocket candy and collect any shortfall for later bank deductions
                     await cursor.execute(f'UPDATE Users SET candy = 0 WHERE id = ?', (target.id,))
                     candy_overflow = current_candy * -1
                     
@@ -68,9 +71,11 @@ class AdminCommands(commands.Cog):
                     bank_balance = (await cursor.fetchone())[0]
                     
                     if bank_balance > candy_overflow:
+                        # Bank covers the full deficit
                         await cursor.execute(f'UPDATE Users SET bank = bank - ? WHERE id = ?', (candy_overflow, target.id))
                         candy_overflow = 0
                     else:
+                        # Bank cannot cover the entire amount, zero it out and track the remaining overflow
                         await cursor.execute(f'UPDATE Users SET bank = 0 WHERE id = ?', (target.id,))
                         candy_overflow = candy_overflow - bank_balance
                         

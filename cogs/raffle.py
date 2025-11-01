@@ -217,6 +217,7 @@ class Raffle(commands.Cog):
         await interaction.response.send_message(file=file)
     
     async def download_avatars(self, win_counts: dict):
+        # Fetch avatar bytes for each winner so the result image can include profile pictures
         avatars = {}
         
         async with aiohttp.ClientSession() as session:

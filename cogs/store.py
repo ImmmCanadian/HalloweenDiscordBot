@@ -5,6 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Number of store entries to display on each page of the browser
 ITEMS_PER_PAGE = 10
 camp_upgrades = ["Outfit Update","Extended/Retracted Curfew","Increased Lighting","Generators","Trap/Mechanisms"]
 interactions = ["murder","flower","hero","accusation","interrogation","makeasacrifice","skinnydip","wedgie"]
@@ -82,7 +83,7 @@ class Store(commands.Cog):
         try:
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
-                    # Returns None if item does not exist in our DB
+                    # Load the existing store entry so we can insert or increment quantity
                     await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
                     result = await cursor.fetchone()
 
@@ -114,7 +115,7 @@ class Store(commands.Cog):
         try:
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
-                    # Returns None if item does not exist in our DB
+                    # Check whether the item exists before attempting to adjust inventory
                     await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
                     result = await cursor.fetchone()
 
@@ -122,7 +123,7 @@ class Store(commands.Cog):
                         await interaction.followup.send("Item does not exist in our database.", ephemeral=True)
                         return
 
-                    # Returns our items quantity
+                    # Read the current stock level to determine how much to remove
                     await cursor.execute('SELECT quantity FROM Store WHERE name = ?', (item_name,))
                     result = await cursor.fetchone()
                     current_quantity = result[0]
@@ -163,7 +164,7 @@ class Store(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
-                #Returns None if item does not exist in our DB
+                # Look up the item definition so we can validate availability and price
                 await cursor.execute('SELECT * FROM Store WHERE name = ?', (item_name,))
                 result = await cursor.fetchone()
 
@@ -177,12 +178,13 @@ class Store(commands.Cog):
                 role_id = int(result[3])
                 
 
-                #Check if user trying to purchase more than 1 of a role or user already has the role
+                # Prevent stacking role-based items and refuse if the user already owns the role
                 if (quantity > 1 and role_id > 0) or interaction.user.get_role(role_id) != None: 
                     await interaction.response.send_message("You can only buy a max of 1 for a role!", ephemeral = True)
                     
                     return
 
+                # Retrieve the caller's candy balance before charging them
                 await cursor.execute('SELECT candy FROM Users WHERE id = ?', (user_id,))
                 user_candy_amount = await cursor.fetchone()
                 user_candy_amount = user_candy_amount[0]
@@ -205,6 +207,7 @@ class Store(commands.Cog):
                 if role_id > 0: #If the item we are trying to buy is a role
                     
                     await interaction.user.add_roles(interaction.guild.get_role(role_id))
+                    # Charge the user and reduce stock for single-role purchases
                     await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (price, user_id))
                     new_candy_amount = await cursor.fetchone()
                     new_candy_amount = new_candy_amount[0]
@@ -224,6 +227,7 @@ class Store(commands.Cog):
                     
                 else:
                     
+                    # Handle non-role items by charging and lowering stock by the requested quantity
                     await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (price*quantity, user_id))
                     new_candy_amount = await cursor.fetchone()
                     new_candy_amount = new_candy_amount[0]
@@ -247,8 +251,10 @@ class Store(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
                 if category and category != "All":
+                    # Count items restricted to the selected category
                     await cursor.execute("SELECT COUNT(*) FROM Store WHERE category = ?", (category,))
                 else:
+                    # Count all items for the uncategorized view
                     await cursor.execute("SELECT COUNT(*) FROM Store")
                 total_items = await cursor.fetchone()
                 total_items = total_items[0]
@@ -261,9 +267,11 @@ class Store(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
                 if category and category != "All":
+                    # Pull a window of items from the filtered category for the current page
                     await cursor.execute("SELECT name, quantity, price FROM Store WHERE category = ? LIMIT ? OFFSET ?", 
                                        (category, ITEMS_PER_PAGE, offset))
                 else:
+                    # Pull a page of items without category filtering
                     await cursor.execute("SELECT name, quantity, price FROM Store LIMIT ? OFFSET ?", 
                                        (ITEMS_PER_PAGE, offset))
                 data = await cursor.fetchall()
@@ -322,6 +330,7 @@ class Store(commands.Cog):
             self.add_item(self.category_select)
         
         async def initialize(self):
+            # Recompute result counts and navigation state whenever the view refreshes
             self.total_items = await self.cog.get_total_items(self.selected_category)
             self.max_page = (self.total_items - 1) // ITEMS_PER_PAGE if self.total_items > 0 else 0
             self.update_buttons()

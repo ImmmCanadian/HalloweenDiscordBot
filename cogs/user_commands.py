@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 USERS_PER_PAGE = 10
 
+# Users in this list are ignored for leaderboard calculations
 EXCLUDED_USER_IDS = [
     1198639825411129375,
     802733611140644915,
@@ -53,6 +54,7 @@ class UserCommands(commands.Cog):
 
         utils_cog = self.bot.get_cog("Utils")
 
+        # Ensure the user row exists before applying cooldown logic
         await utils_cog.check_user_exists(user_id, user_name)
 
         cooldown_data = await utils_cog.check_cooldown(interaction)
@@ -74,6 +76,7 @@ class UserCommands(commands.Cog):
 
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
+                    # Persist the reward and cooldown timestamp atomically
                     await cursor.execute(f'UPDATE users SET candy = candy + ?, {cooldown_name} = ? WHERE id = ? RETURNING candy', (reward, executed_time, user_id))
                     result = await cursor.fetchone()
                     await connection.commit()
@@ -130,6 +133,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
+                    # Inspect the relevant account bucket before attempting to move funds
                     if command_name == "deposit":
                         await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
                     else:
@@ -140,6 +144,7 @@ class UserCommands(commands.Cog):
                     if user_candy_amount < amount:
                         await interaction.response.send_message(f"You can't {command_name} candy that you dont got.")
                     elif command_name == "deposit":
+                        # Move the requested amount into the bank, returning the updated balances for logging
                         await cursor.execute(f'UPDATE users SET candy = candy - ?, bank = bank + ? WHERE id = ? RETURNING candy, bank', (amount, amount, user_id))
                         result = await cursor.fetchone()
                         await connection.commit()
@@ -147,6 +152,7 @@ class UserCommands(commands.Cog):
                         await interaction.response.send_message(f"🏦 You have deposited {amount} candy successfully.")
                         logger.info(f"DB_UPDATE: Moved {amount} candy to user: {user_name}'s id: {user_id} bank. Candy balance: {new_candy_amount} Bank Balance: {new_bank_amount}")
                     else:
+                        # Reverse the direction when handling a withdrawal request
                         await cursor.execute(f'UPDATE users SET candy = candy + ?, bank = bank - ? WHERE id = ? RETURNING candy, bank', (amount, amount, user_id))
                         result = await cursor.fetchone()
                         await connection.commit()
@@ -212,6 +218,7 @@ class UserCommands(commands.Cog):
 
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Lock the balances so another transfer cannot interleave with this one
                 await cursor.execute("BEGIN IMMEDIATE")
 
                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
@@ -219,6 +226,7 @@ class UserCommands(commands.Cog):
                 user_candy_amount= user_candy_amount[0]
 
                 if user_candy_amount >= amount:
+                    # Debit the sender before crediting the recipient to enforce ordering
                     await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (amount, user_id))
                     user_candy_amount = await cursor.fetchone()
                     user_candy_amount= user_candy_amount[0]
@@ -228,6 +236,7 @@ class UserCommands(commands.Cog):
                     await connection.commit()
                     await interaction.response.send_message(f"🎁 You gave {amount} candy to {target.mention}!")
                 else:
+                    # Roll back if the sender no longer has enough to cover the request
                     await connection.rollback()
                     await interaction.response.send_message(f"You dont have enough candy to do that.")
                     target_candy_amount = 0
@@ -253,6 +262,7 @@ class UserCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
+                # Fetch pocket and bank values for the current user snapshot
                 await cursor.execute(f'SELECT candy, bank FROM Users WHERE id = ?', (user_id,))
                 user_candy_amount = await cursor.fetchone()
                  
@@ -280,6 +290,7 @@ class UserCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
+                # Retrieve the target member's balances before composing the response
                 await cursor.execute(f'SELECT candy, bank FROM Users WHERE id = ?', (target_id,))
                 target_candy_amount = await cursor.fetchone()
                  
@@ -308,6 +319,7 @@ class UserCommands(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
+                # Collect cooldown timestamps for each supported command
                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
                 user_candy_amount = await cursor.fetchone()
                 await cursor.execute(f'SELECT rob_cooldown FROM Users WHERE id = ?', (user_id,))
@@ -928,7 +940,7 @@ class UserCommands(commands.Cog):
             if bot_choice == "SUCCEED":
                 async with asqlite.connect('./database.db') as connection:
                     async with connection.cursor() as cursor:
-                        
+                        # Load the target's current candy stash before calculating the steal amount
 
                         await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target_id,))
                         db_result = await cursor.fetchone()
@@ -946,6 +958,7 @@ class UserCommands(commands.Cog):
                         # else:
                         #     steal = random.randint(0, 500)
                         
+                        # Deduct from the victim and grant the thief while recording both cooldowns
                         await cursor.execute(f'UPDATE users SET candy = candy - ?, robbed_cooldown = ? WHERE id = ? RETURNING candy', (stolen_candy, executed_time, target_id))
                         target_candy_amount = await cursor.fetchone()
                         target_candy_amount= target_candy_amount[0]
@@ -962,6 +975,7 @@ class UserCommands(commands.Cog):
             else: #Fail logic lose 10% of bank
                 async with asqlite.connect('./database.db') as connection:
                     async with connection.cursor() as cursor:
+                        # Base the penalty on the user's banked candy balance
                         await cursor.execute(f'SELECT bank FROM Users WHERE id = ?', (user_id,))
                         db_result = await cursor.fetchone()
                         db_result= db_result[0]
@@ -973,6 +987,7 @@ class UserCommands(commands.Cog):
                         else:
                             steal = int(0.1 * db_result)
 
+                        # Update the victim's robbed cooldown and fine the robber in the same transaction
                         await cursor.execute(f'UPDATE users SET robbed_cooldown = ? WHERE id = ?', ( executed_time, target_id))
                         await cursor.execute(f'UPDATE users SET bank = bank - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
                         
@@ -1038,6 +1053,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Confirm the user bought the murder interaction before spending a charge
                 await cursor.execute(f'SELECT murder_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 murder_count= db_result[0]
@@ -1074,6 +1090,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Confirm the user bought this interaction before decrementing their inventory
                 await cursor.execute(f'SELECT flower_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 flower_count= db_result[0]
@@ -1098,6 +1115,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Ensure a hero token is available before alerting staff
                 await cursor.execute(f'SELECT hero_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 hero_count= db_result[0]
@@ -1125,6 +1143,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Verify the caller owns an accusation before logging the claim
                 await cursor.execute(f'SELECT accusation_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 accusation_count= db_result[0]
@@ -1151,6 +1170,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Check inventory for an interrogation before notifying the channel
                 await cursor.execute(f'SELECT interrogation_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 interrogate_count= db_result[0]
@@ -1189,6 +1209,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Validate that the ritual was purchased before swapping life states
                 await cursor.execute(f'SELECT makeasacrifice_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 makeasacrifice_count= db_result[0]
@@ -1211,6 +1232,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Check that the user has an unused skinny dip charge before proceeding
                 await cursor.execute(f'SELECT skinnydip_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 skinnydip_count= db_result[0]
@@ -1230,6 +1252,7 @@ class UserCommands(commands.Cog):
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
+                # Ensure the prank was purchased before decrementing the available count
                 await cursor.execute(f'SELECT wedgie_count FROM users WHERE id = ?', (interaction.user.id, ))
                 db_result = await cursor.fetchone()
                 wedgie_count= db_result[0]

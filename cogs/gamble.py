@@ -1071,7 +1071,7 @@ class Gamble(commands.Cog):
                 await self.message.edit(embed=embed, view=self)
         
     async def check_user_bet(self, interaction, bet, user_id, user_name):
-        
+        # Validate the wager and debit the player's balance before the mini-game starts
         if bet <= 0:
             await interaction.response.send_message("Earn some candy before you try to gamble...", ephemeral=False)
             return True
@@ -1082,6 +1082,7 @@ class Gamble(commands.Cog):
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
 
+                # Pull the latest candy balance to ensure the user can cover the stake
                 await cursor.execute(f'SELECT candy FROM users WHERE id = ?', (user_id,))
                 user_candy_amount = await cursor.fetchone()
                 user_candy_amount = user_candy_amount[0]
@@ -1091,6 +1092,7 @@ class Gamble(commands.Cog):
                     return True
                 
                 
+                # Reserve the bet amount so losses update immediately
                 await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (bet, user_id))
                 new_candy_amount = await cursor.fetchone()
                 new_candy_amount = new_candy_amount[0]
@@ -1104,6 +1106,7 @@ class Gamble(commands.Cog):
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
 
+                    # Apply the winnings (or zero) back to the player's balance after the game resolves
                     await cursor.execute(f'UPDATE users SET candy = candy + ? WHERE id = ? RETURNING candy', (winnings, user_id))
                     new_candy_amount = await cursor.fetchone()
                     await connection.commit()
@@ -1119,6 +1122,7 @@ class Gamble(commands.Cog):
             async with asqlite.connect('./database.db') as connection:
                 async with connection.cursor() as cursor:
 
+                    # Deduct the follow-up bet when the user opts to spin again
                     await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ?', (bet, user_id))
                     await connection.commit()
             
