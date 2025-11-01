@@ -26,6 +26,10 @@ class Gamble(commands.Cog):
     
     @app_commands.command(name="rps", description="Gamble on rock paper scissors!")
     async def rps(self, interaction: discord.Interaction, bet: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -137,6 +141,10 @@ class Gamble(commands.Cog):
     
     @app_commands.command(name="coin-toss", description="Gamble on a coin toss!")
     async def cointoss(self, interaction: discord.Interaction, bet: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -269,6 +277,10 @@ class Gamble(commands.Cog):
                 
     @app_commands.command(name="blackjack", description="Play some blackjack!")
     async def blackjack(self, interaction: discord.Interaction, bet: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -479,6 +491,8 @@ class Gamble(commands.Cog):
             status_y = 520
             if self.game_state == "Blackjack":
                 draw_centered_text("BLACKJACK!", status_y, text_font, 'gold')
+            elif self.game_state == "Dealer Blackjack":
+                draw_centered_text("DEALER BLACKJACK!", status_y, text_font, 'red')
             elif self.game_state == "Bust":
                 draw_centered_text("BUST!", status_y, text_font, 'red')
             elif self.game_state == "Timeout":
@@ -549,7 +563,7 @@ class Gamble(commands.Cog):
         async def create_embed(self):
             embed = discord.Embed(
                 title="🃏 Blackjack", 
-                color=0x00ff00 if self.game_over and self.game_state not in ["Bust", "Timeout"] else 0x9B59B6
+                color=0x00ff00 if self.game_over and self.game_state not in ["Bust", "Timeout", "Dealer Blackjack"] else 0x9B59B6
             )
             embed.set_author(
                 name=f"{self.user.display_name}",
@@ -560,6 +574,8 @@ class Gamble(commands.Cog):
             if self.game_state == "Blackjack":
                 winnings = int(self.bet * 2.5)
                 embed.set_footer(text=f"🎉 Blackjack! You won {winnings} candy! 🎉")
+            elif self.game_state == "Dealer Blackjack":
+                embed.set_footer(text=f"🃏 Dealer Blackjack! You lost {self.bet} candy 🃏")
             elif self.game_state == "Bust":
                 embed.set_footer(text=f"💥 Bust! You lost {self.bet} candy 💥")
             elif self.game_state == "Timeout":
@@ -598,6 +614,12 @@ class Gamble(commands.Cog):
                         blackjack_total = int(self.bet * 2.5)  # total returned (bet + 1.5*bet)
                         await self.cog.user_update_candy(blackjack_total, self.bet, self.user.id)
                         self.payout_processed = True
+            elif dealer_blackjack_check == 21:
+                # Dealer has blackjack but player doesn't => player loses
+                self.game_state = "Dealer Blackjack"
+                self.game_over = True
+                self.dealer_total = dealer_blackjack_check
+                # No payout needed - player already lost their bet
 
             if self.game_over:
                 for item in self.children:
@@ -680,7 +702,7 @@ class Gamble(commands.Cog):
             
             return total
 
-    @app_commands.command(name="roulette", description="Play American Roulette! Bet on red, black, or green!")
+    @app_commands.command(name="roulette", description="Play Roulette! Bet on red, black, or green!")
     @app_commands.describe(
         bet="Amount of candy to bet",
         color="Choose a color: red, black, or green"
@@ -691,6 +713,10 @@ class Gamble(commands.Cog):
         app_commands.Choice(name="🟢 Green", value="green")
     ])
     async def roulette(self, interaction: discord.Interaction, bet: int, color: str):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         user_id = interaction.user.id
         user_name = interaction.user.name
 
@@ -762,6 +788,10 @@ class Gamble(commands.Cog):
             # Disable all buttons
             for item in self.children:
                 item.disabled = True
+            
+            if self.first_spin == True:
+                await self.cog.user_update_candy(self.bet, self.bet, self.user.id)
+                
             
             embed = self.create_final_embed()
             await interaction.response.edit_message(embed=embed, view=self)
@@ -880,8 +910,8 @@ class Gamble(commands.Cog):
             
             if won:
                 if self.color == "green":
-                    # Green pays 35:1 in American roulette (for 0 or 00)
-                    winnings = int(self.bet * 35)
+                   
+                    winnings = int(self.bet * 17)
                 else:
                     # Red/Black pays 1:1
                     winnings = int(self.bet * 2)
@@ -900,7 +930,7 @@ class Gamble(commands.Cog):
             await message.edit(embed=embed, view=self)
         
         def get_number_color(self, number):
-            """Get the color of a number in American roulette"""
+            """Get the color of a number in roulette"""
             if number in GREEN_NUMBERS:
                 return "green"
             elif number in RED_NUMBERS:
@@ -922,7 +952,7 @@ class Gamble(commands.Cog):
             default_wheel = "🟥 ⬛ 🟥 ⬛ 🟥 🟩 ⬛ 🟥 ⬛ 🟥 ⬛"
             
             embed = discord.Embed(
-                title="🎰 American Roulette 🎰",
+                title="🎰 Roulette 🎰",
                 description=f"```\n                ⬇️\n{default_wheel}\n                ⬆️\n```\nPress **SPIN** to start the wheel!",
                 color=self.get_embed_color(self.color)
             )
@@ -934,7 +964,7 @@ class Gamble(commands.Cog):
             embed.add_field(name="Betting On", value=f"{self.get_color_emoji(self.color)} {self.color.upper()}", inline=True)
             
             if self.color == "green":
-                embed.add_field(name="Payout", value="35:1", inline=True)
+                embed.add_field(name="Payout", value="17:1", inline=True)
             else:
                 embed.add_field(name="Payout", value="1:1", inline=True)
                 
@@ -1020,7 +1050,7 @@ class Gamble(commands.Cog):
             embed.add_field(name="Total Lost", value=f"{self.total_losses} candy", inline=True)
             embed.add_field(name="Net Profit", value=f"**{net_profit}** candy", inline=True)
             
-            embed.set_footer(text="Thanks for playing American Roulette!")
+            embed.set_footer(text="Thanks for playing Roulette!")
             return embed
         
         def get_embed_color(self, color):
@@ -1064,7 +1094,7 @@ class Gamble(commands.Cog):
                 await cursor.execute(f'UPDATE users SET candy = candy - ? WHERE id = ? RETURNING candy', (bet, user_id))
                 new_candy_amount = await cursor.fetchone()
                 new_candy_amount = new_candy_amount[0]
-                logger.info(f"DB_UPDATE: Removed {user_candy_amount} from user: {user_name}'s id: {user_id} Old total: {user_candy_amount} New Total: {new_candy_amount}")
+                logger.info(f"DB_UPDATE: Removed {bet} from user: {user_name}'s id: {user_id} Old total: {user_candy_amount} New Total: {new_candy_amount}")
                 
                      
         return False

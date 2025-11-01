@@ -24,6 +24,10 @@ class Raffle(commands.Cog):
         time = "Enter the date format DD/MM/YYYY which it should end." 
     )
     async def createraffle(self, interaction: discord.Interaction, item_name: str, winner_count: int, ticket_price: int, time: str):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         if winner_count <= 0 or ticket_price <= 0:
             await interaction.response.send_message("Values must be positive!", ephemeral=True)
@@ -56,6 +60,10 @@ class Raffle(commands.Cog):
         item_name="The name of the raffle prize, case sensitive"
     )
     async def buytickets(self, interaction: discord.Interaction, item_name: str, amount: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         if amount <= 0:
             await interaction.response.send_message("Amount must be positive!", ephemeral=True)
@@ -119,6 +127,10 @@ class Raffle(commands.Cog):
     @app_commands.command(name="draw-raffle", description="Draw raffle winners!")
     @app_commands.checks.has_permissions(administrator=True)
     async def drawraffle(self, interaction: discord.Interaction, item_name: str):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:

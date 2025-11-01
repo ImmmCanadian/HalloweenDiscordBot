@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-ITEMS_PER_PAGE = 5
+ITEMS_PER_PAGE = 10
 camp_upgrades = ["Outfit Update","Extended/Retracted Curfew","Increased Lighting","Generators","Trap/Mechanisms"]
 interactions = ["murder","flower","hero","accusation","interrogation","makeasacrifice","skinnydip","wedgie"]
 
@@ -17,6 +17,7 @@ class Store(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         role="Put the role id (right click role in role list) or put None (Not a role)", 
+        role="Put the role id (right click role in role list) or put None (Not a role)", 
         category="Select the item category"
     )
     @app_commands.choices(category=[
@@ -27,6 +28,10 @@ class Store(commands.Cog):
         app_commands.Choice(name="Interactions", value="Interactions")
     ])
     async def add_store_item(self, interaction: discord.Interaction, item_name: str, quantity: int, role: str, category: str, price: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         await interaction.response.defer(ephemeral=True)
         
@@ -36,6 +41,19 @@ class Store(commands.Cog):
         if role.lower() != "none":
             role_obj = None
             
+            try:
+                # Convert role input to integer (role IDs are integers)
+                role_id = int(role)
+                
+                # Get role by ID
+                role_obj = interaction.guild.get_role(role_id)
+                
+                if role_obj is None:
+                    await interaction.followup.send("This role doesn't exist in the server. Please check the role ID and try again.", ephemeral=True)
+                    return
+                    
+            except ValueError:
+                await interaction.followup.send("Invalid role ID. Please provide a valid role ID (numbers only).", ephemeral=True)
             try:
                 # Convert role input to integer (role IDs are integers)
                 role_id = int(role)
@@ -86,6 +104,10 @@ class Store(commands.Cog):
     @app_commands.command(name="remove-store-item", description="Remove an item to the store or reduce the quantity (0 quantity removes it).")
     @app_commands.default_permissions(administrator=True)
     async def remove_store_item(self, interaction: discord.Interaction, item_name: str, quantity: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         await interaction.response.defer(ephemeral=True)
 
@@ -121,6 +143,10 @@ class Store(commands.Cog):
     @app_commands.command(name="purchase", description="Purchase an item from the store")
     @app_commands.describe(item_name="Case sensitive, enter the exact item name")
     async def purchase(self, interaction: discord.Interaction, item_name: str, quantity: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
 
         if quantity == 0:
             await interaction.response.send_message(f"This brokie {interaction.user.display_name} just tried to buy 0 or less quantity of an item.", ephemeral = False)
@@ -187,13 +213,12 @@ class Store(commands.Cog):
                     await cursor.execute("SELECT roles FROM Users WHERE id = ?", (user_id,))
                     row = await cursor.fetchone()
                     roles = json.loads(row[0]) if row[0] else []
-                    if item_name not in roles:
+                    if item_name not in [role.lower() for role in roles]:
                         roles.append(item_name)
                         await cursor.execute(
                             "UPDATE Users SET roles = ? WHERE id = ?",
                             (json.dumps(roles), user_id)
                         )
-                        
                     await connection.commit()
                     await interaction.response.send_message("You have bought and gotten your role!", ephemeral=False)
                     
@@ -303,27 +328,26 @@ class Store(commands.Cog):
 
         async def generate_embed(self):
             items = await self.cog.get_page_items(self.page, self.selected_category)
-            header = "Name                   Quantity    Price\n"
-            store_lines = []
-            
-            if not items:
-                store_lines.append("No items available in this category.")
-            else:
-                for name, quantity, price in items:
-                    trimmed_name = (name[:20] + "...") if len(name) > 20 else name
-                    padded_name = f"{trimmed_name:<23}" 
-                    store_lines.append(f"{padded_name} {str(quantity):<10} {str(price)}")
-                    store_lines.append("")
-            
             category_text = f" - {self.selected_category}" if self.selected_category != "All" else ""
             embed = discord.Embed(
                 title=f"🍬 Aches Candy Store{category_text} 🍬\n",
-                description="\u200b\n" + "```"+"\n".join([header] + store_lines)+"```"+"\u200b\n",
+                description="",
                 color=discord.Color.purple()
             )
             embed.set_author(name=f"{self.user.display_name}'s Store", icon_url=self.user.display_avatar.url)
             embed.set_footer(text=f"Page {self.page + 1} of {self.max_page + 1} | Category: {self.selected_category}")
             embed.set_thumbnail(url="https://images.halloweencostumes.com.au/products/12290/1-1/light-up-traditional-pumpkin-upd.jpg")
+
+            if not items:
+                embed.description = "No items available in this category."
+            else:
+                for name, quantity, price in items:
+                    trimmed_name = (name[:20] + "...") if len(name) > 20 else name
+                    embed.add_field(
+                        name=f"{trimmed_name.capitalize()}",
+                        value=f"Price: {price}",
+                        inline=False
+                    )
             return embed
 
         def update_buttons(self):

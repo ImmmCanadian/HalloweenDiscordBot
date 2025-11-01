@@ -13,6 +13,7 @@ class AdminCommands(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def givecandy(self, interaction: discord.Interaction , target: discord.Member, amount: int):
         
+        
         if amount < 0:
             await interaction.response.send_message("You cannot give a negative amount of candy!", ephemeral=True)
             return
@@ -28,6 +29,7 @@ class AdminCommands(commands.Cog):
             async with connection.cursor() as cursor:
 
                 await cursor.execute(f'UPDATE users SET bank = bank + ? WHERE id = ? RETURNING candy', (amount, target.id))
+                await cursor.execute(f'UPDATE users SET bank = bank + ? WHERE id = ? RETURNING candy', (amount, target.id))
                 new_candy_amount = await cursor.fetchone()
                 await connection.commit()
                 
@@ -37,6 +39,7 @@ class AdminCommands(commands.Cog):
     @app_commands.command(name="remove-candy", description="Take a users candy.")
     @app_commands.default_permissions(administrator=True)
     async def removecandy(self, interaction: discord.Interaction , target: discord.Member, amount: int):
+        
         
         if amount < 0:
             await interaction.response.send_message("You cannot remove a negative amount of candy!", ephemeral=True)
@@ -79,6 +82,7 @@ class AdminCommands(commands.Cog):
     @app_commands.command(name="reset-cooldowns", description="Resets all users cooldowns.")
     @app_commands.default_permissions(administrator=True)
     async def resetcooldowns(self, interaction: discord.Interaction):
+        
         # Respond immediately to prevent webhook timeout
         await interaction.response.send_message("⏳ Resetting all user cooldowns...")
         
@@ -115,6 +119,7 @@ class AdminCommands(commands.Cog):
     @app_commands.command(name="admin-help", description="Check what all of your commands do.")
     @app_commands.default_permissions(administrator=True)
     async def adminhelp(self, interaction: discord.Interaction):
+        
 
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -138,30 +143,23 @@ class AdminCommands(commands.Cog):
     
         await interaction.response.send_message(embed=embed, ephemeral=True)
         
-    # @app_commands.command(name="test", description="Noah's Testing Command.")
-    # @app_commands.default_permissions(administrator=True)
-    # async def adminhelp(self, interaction: discord.Interaction, target: discord.Member):
-
-    #     user_id = interaction.user.id
-    #     user_name = interaction.user.name
-    #     user = interaction.user
+    @app_commands.command(name="test", description="Noah's Testing Command.")
+    @app_commands.default_permissions(administrator=True)
+    async def adminhelp(self, interaction: discord.Interaction, target: discord.Member):
         
 
-    #     utils_cog = self.bot.get_cog("Utils")
-    #     await utils_cog.check_user_exists(user_id, user_name)
-        
-    #     async with asqlite.connect('./database.db') as connection:
-    #             async with connection.cursor() as cursor:
-    #                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
-    #                 db_result = await cursor.fetchone()
-    #                 db_result= db_result[0]
-    #                 await cursor.execute(f'UPDATE users SET candy = ? WHERE id = ?', (int(db_result), user_id))
-    #                 await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (target.id,))
-    #                 db_result = await cursor.fetchone()
-    #                 db_result= db_result[0]
-    #                 await cursor.execute(f'UPDATE users SET candy = ? WHERE id = ?', (int(db_result), target.id))
-                    
-                    
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+        user = interaction.user
+        update = '[]'
 
+        utils_cog = self.bot.get_cog("Utils")
+        await utils_cog.check_user_exists(user_id, user_name)
+        
+        async with asqlite.connect('./database.db') as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(f'UPDATE Users SET robbed_cooldown = 0, rob_cooldown = 0 WHERE id = 239474338351415306') #noah
+                    await cursor.execute(f'UPDATE Users SET robbed_cooldown = 0, rob_cooldown = 0 WHERE id = 492878057061875712') #alter
+                    
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCommands(bot))

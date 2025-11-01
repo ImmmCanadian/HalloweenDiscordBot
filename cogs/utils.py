@@ -1,9 +1,21 @@
 import discord, random, time, asqlite
 from typing import Optional
 from discord.ext import commands
+import datetime
+import zoneinfo
 
 
 class Utils(commands.Cog):
+    @staticmethod
+    def is_pst_blocked():
+        """
+        Returns True if current time is after October 31, 2025, 11:59 PM PST.
+        """
+        
+        # Set cutoff: October 31, 2025, 11:59:59 PM PST
+        cutoff = datetime.datetime(2025, 10, 31, 23, 59, 59, tzinfo=zoneinfo.ZoneInfo("America/Los_Angeles"))
+        now = datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
+        return now > cutoff
 
     name_reference = {
             'weekly': "weekly_cooldown",

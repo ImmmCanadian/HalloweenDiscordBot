@@ -7,8 +7,30 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+USERS_PER_PAGE = 10
+
+EXCLUDED_USER_IDS = [
+    1198639825411129375,
+    802733611140644915,
+    737819231940378685,
+    496236198948503563,
+    359555744422559747,
+    239474338351415306,
+    1144727878936838154,
+    192819869664673812,
+    394993603497426945,
+    732637562912374825,
+    555093222175539220,
+    356559404956516352,
+    1202963715125936225,
+    374679702599892994,
+    316320318979440640,
+    526185212271394817,
+    729738838817374308
+]
+
 ROB_CHOICES = ["SUCCEED", "FAIL"]
-ROB_WEIGHTS = [0.8,0.2]
+ROB_WEIGHTS = [0.5,0.5]
 WEAPON_ROLE_IDS = {
     1421374048700596305,  
     1421374098109497444,
@@ -18,6 +40,8 @@ WEAPON_ROLE_IDS = {
     1421374343178620938,
     1421374395401895946
 }
+
+
 
 class UserCommands(commands.Cog):
     def __init__(self, bot):
@@ -40,9 +64,12 @@ class UserCommands(commands.Cog):
 
             if cooldown_name == "daily_cooldown":
                 reward = random.randint(2000, 4000)
+                reward = random.randint(2000, 4000)
             elif cooldown_name == "weekly_cooldown":
                 reward = random.randint(10000, 20000)
+                reward = random.randint(10000, 20000)
             else:
+                reward = random.randint(200, 400)
                 reward = random.randint(200, 400)
 
             async with asqlite.connect('./database.db') as connection:
@@ -53,20 +80,32 @@ class UserCommands(commands.Cog):
                     new_candy_amount = result[0]
                     logger.info(f"DB_UPDATE: Added {reward} candy to user: {user_name}'s id: {user_id} total: {new_candy_amount}")
 
-            await interaction.response.send_message(f"You got {reward} candy!")
+            await interaction.response.send_message(f"🍬 You got {reward} candy!")
         else:
             await interaction.response.send_message(f"This command is still on cooldown for another {utils_cog.convert_seconds_to_string(user_time_left)} hours.")
 
     @app_commands.command(name="daily", description="Claim your daily candy!")
     async def dailycandy(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         await self.candy_cooldown(interaction)
     
     @app_commands.command(name="hourly", description="Claim your hourly candy!")
     async def hourlycandy(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         await self.candy_cooldown(interaction)
     
     @app_commands.command(name="weekly", description="Claim your weekly candy!")
     async def weeklycandy(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         await self.candy_cooldown(interaction)
         
         
@@ -105,34 +144,61 @@ class UserCommands(commands.Cog):
                         result = await cursor.fetchone()
                         await connection.commit()
                         new_candy_amount, new_bank_amount = result[0], result[1]
-                        await interaction.response.send_message(f"You have deposited {amount} candy successfully.")
+                        await interaction.response.send_message(f"🏦 You have deposited {amount} candy successfully.")
                         logger.info(f"DB_UPDATE: Moved {amount} candy to user: {user_name}'s id: {user_id} bank. Candy balance: {new_candy_amount} Bank Balance: {new_bank_amount}")
                     else:
                         await cursor.execute(f'UPDATE users SET candy = candy + ?, bank = bank - ? WHERE id = ? RETURNING candy, bank', (amount, amount, user_id))
                         result = await cursor.fetchone()
                         await connection.commit()
                         new_candy_amount, new_bank_amount = result[0], result[1]
-                        await interaction.response.send_message(f"You have withdrawn {amount} candy successfully.")
+                        await interaction.response.send_message(f"🏦 You have withdrawn {amount} candy successfully.")
                         logger.info(f"DB_UPDATE: Moved {amount} candy to user: {user_name}'s id: {user_id} candy balance. Candy balance: {new_candy_amount} Bank Balance: {new_bank_amount}")
                         
                     
         
     @app_commands.command(name="deposit", description="Deposit your candy! Makes it safe from robbing.")
     async def deposit(self, interaction: discord.Interaction, amount: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         await self.bank(interaction, amount)
           
     @app_commands.command(name="withdraw", description="Withdraw your candy!")
     async def withdraw(self, interaction: discord.Interaction, amount: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         await self.bank(interaction, amount)
 
     @app_commands.command(name="send-candy", description="Send candy to someone.")
     async def sendycandy(self, interaction: discord.Interaction, target: discord.Member, amount: int):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
+
+        # Ensure we compare integers (IDs are ints, not strings)
+        if interaction.user.id == 729738838817374308:
+            await interaction.response.send_message("You can't send candy as you have been DQ'd.", ephemeral=True)
+            return
+
+        if target.id == 729738838817374308:
+            await interaction.response.send_message("You can't send candy to this user as they have been DQ'd.", ephemeral=True)
+            return
+
+        if amount <= 0:
+            await interaction.response.send_message("You must send a positive amount of candy!", ephemeral=True)
+            return
 
         user_id = interaction.user.id
         user_name = interaction.user.name
         
+        
         target_id = target.id
         target_name = target.name
+        
         
 
         utils_cog = self.bot.get_cog("Utils")
@@ -160,10 +226,11 @@ class UserCommands(commands.Cog):
                     target_candy_amount = await cursor.fetchone()
                     target_candy_amount= target_candy_amount[0]
                     await connection.commit()
-                    await interaction.response.send_message(f"You gave {amount} candy to {target.mention}!")
+                    await interaction.response.send_message(f"🎁 You gave {amount} candy to {target.mention}!")
                 else:
                     await connection.rollback()
                     await interaction.response.send_message(f"You dont have enough candy to do that.")
+                    target_candy_amount = 0
                 
                 await connection.commit()
                 logger.info(f"DB_UPDATE: Sent {amount} candy From user: {user_name}'s id: {user_id} to target: {target_name}'s id: {target_id}. User balance: {user_candy_amount} Target balance: {target_candy_amount}")
@@ -172,6 +239,10 @@ class UserCommands(commands.Cog):
 
     @app_commands.command(name="my-balance", description="Check your candy balance.")
     async def mybalance(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
 
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -190,10 +261,14 @@ class UserCommands(commands.Cog):
         bank_balance= user_candy_amount[1]
         user_candy_amount= user_candy_amount[0]
         
-        await interaction.response.send_message(f"You have {user_candy_amount} pieces of candy in your pockets. \nYou have {bank_balance} in your bank!")
+        await interaction.response.send_message(f"🍬 You have {user_candy_amount} pieces of candy in your pockets. \n🏦 You have {bank_balance} in your bank!")
         
     @app_commands.command(name="balance", description="Check someones balance.")
     async def balance(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
 
         target_id = target.id
         target_name = target.name
@@ -213,10 +288,14 @@ class UserCommands(commands.Cog):
         bank_balance= target_candy_amount[1]
         target_candy_amount= target_candy_amount[0]
         
-        await interaction.response.send_message(f"{target_display} has {target_candy_amount} pieces of candy in their pockets. \nThey have {bank_balance} in their bank!")
+        await interaction.response.send_message(f"{target_display} has 🍬 {target_candy_amount} pieces of candy in their pockets. \n🏦 They have {bank_balance} in their bank!")
 
     @app_commands.command(name="cooldowns", description="Check all of your cooldowns.")
     async def cooldowns(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
 
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -260,19 +339,24 @@ class UserCommands(commands.Cog):
         cooldown_embed = discord.Embed(title=f"Command Cooldowns", color=0x9B59B6)
         cooldown_embed.set_author(
             name=f"{user.display_name}",
+            name=f"{user.display_name}",
             icon_url=user.display_avatar.url)
             
-        cooldown_embed.add_field(name="Candy Balance",value=f"{user_candy_amount}\n")
-        cooldown_embed.add_field(name="Hourly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(hourly_name, hourly_cooldown)}\n",inline=False)
-        cooldown_embed.add_field(name="Daily Cooldown",value=f"{utils_cog.convert_cooldown_into_time(daily_name, daily_cooldown)}\n",inline=False)
-        cooldown_embed.add_field(name="Weekly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(weekly_name, weekly_cooldown)}\n",inline=False)
-        cooldown_embed.add_field(name="Rob Cooldown",value=f"{utils_cog.convert_cooldown_into_time(rob_name, rob_cooldown)}\n",inline=False)
-        cooldown_embed.add_field(name="Robbed Cooldown",value=f"{utils_cog.convert_cooldown_into_time(robbed_name, robbed_cooldown)}",inline=False)
+        cooldown_embed.add_field(name="🍬 Candy Balance",value=f"{user_candy_amount}\n")
+        cooldown_embed.add_field(name="⏰ Hourly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(hourly_name, hourly_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="☀️ Daily Cooldown",value=f"{utils_cog.convert_cooldown_into_time(daily_name, daily_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="📅 Weekly Cooldown",value=f"{utils_cog.convert_cooldown_into_time(weekly_name, weekly_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="🦹 Rob Cooldown",value=f"{utils_cog.convert_cooldown_into_time(rob_name, rob_cooldown)}\n",inline=False)
+        cooldown_embed.add_field(name="🛡️ Robbed Cooldown",value=f"{utils_cog.convert_cooldown_into_time(robbed_name, robbed_cooldown)}",inline=False)
 
         await interaction.response.send_message(embed=cooldown_embed)
 
     @app_commands.command(name="help", description="Check what all of your commands do.")
     async def help(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
 
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -283,6 +367,7 @@ class UserCommands(commands.Cog):
 
         embed = discord.Embed(title=f"Help!", description="These are all of the available user commands! If a command throws an error, make sure to read what should be entered into the field (ex. when purchasing item_name is case sensitive)", color=0x9B59B6)
         embed.set_author(
+            name=f"{user.display_name}",
             name=f"{user.display_name}",
             icon_url=user.display_avatar.url)
 
@@ -569,6 +654,10 @@ class UserCommands(commands.Cog):
         
     @app_commands.command(name="profile", description="Display your profile!")
     async def profile(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -604,7 +693,7 @@ class UserCommands(commands.Cog):
         try:
             # Get the path to the background image
             cog_dir = Path(__file__).parent.parent 
-            bg_image_path = cog_dir / "images" / "bgimage.jpg"  
+            bg_image_path = cog_dir / "images" / "bgimage.png"  
             
             if bg_image_path.exists():
                 bg_img = Image.open(bg_image_path).convert('RGB')
@@ -616,9 +705,9 @@ class UserCommands(commands.Cog):
                 img.paste(bg_img, (0, 0))
                 
                 # Add dark overlay for text readability
-                overlay = Image.new('RGBA', (width, height), (0, 0, 0, 140))
-                img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
-                draw = ImageDraw.Draw(img)
+                # overlay = Image.new('RGBA', (width, height), (0, 0, 0, 140))
+                # img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
+                # draw = ImageDraw.Draw(img)
             else:
                 print(f"Background image not found at {bg_image_path}")
                 # Fill with a solid dark color as fallback
@@ -681,7 +770,7 @@ class UserCommands(commands.Cog):
         content_y = 220
         
         # Balance section
-        self.draw_section_header(draw, "BALANCES:", 50, content_y, header_font)
+        self.draw_section_header(draw, "★ BALANCES:", 50, content_y, header_font)
         
         # Candy in pocket
         candy_y = content_y + 45
@@ -702,7 +791,7 @@ class UserCommands(commands.Cog):
         
         # Roles section
         roles_y = total_y + 60
-        self.draw_section_header(draw, "ROLES:", 50, roles_y, header_font)
+        self.draw_section_header(draw, "★ ROLES:", 50, roles_y, header_font)
         
         roles_text = "No special roles"
         if roles:
@@ -797,6 +886,10 @@ class UserCommands(commands.Cog):
 
     @app_commands.command(name="rob", description="Steal someones candy!")
     async def rob(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         user_id = interaction.user.id
         user_name = interaction.user.name
@@ -808,9 +901,14 @@ class UserCommands(commands.Cog):
             return
         
         is_admin = target.get_role(637868242932858911)
+        is_owner = target.get_role(689473122423799900)
         
         if is_admin != None:
             await interaction.response.send_message(f"You can't rob a camp counsellor!", ephemeral=True)
+            return
+
+        if is_owner != None:
+            await interaction.response.send_message(f"You can't rob the Head Counselor!", ephemeral=True)
             return
 
         utils_cog = self.bot.get_cog("Utils")
@@ -859,29 +957,49 @@ class UserCommands(commands.Cog):
                         
                         
                 logger.info(f"DB_UPDATE: Robbed {stolen_candy} candy {steal_percent}% {db_result} to user: {user_name}'s id: {user_id} from target: {target_name}'s id: {target_id}. User balance: {user_candy_amount} Target balance: {target_candy_amount}")
-                await interaction.response.send_message(f"{interaction.user.mention} stole {stolen_candy} candy from {target.mention}!")
-                
-            else: #Fail logic
+                await interaction.response.send_message(f"🦹 {interaction.user.mention} stole {stolen_candy} candy from {target.mention}!")
+            
+            else: #Fail logic lose 10% of bank
                 async with asqlite.connect('./database.db') as connection:
                     async with connection.cursor() as cursor:
-                        await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+                        await cursor.execute(f'SELECT bank FROM Users WHERE id = ?', (user_id,))
                         db_result = await cursor.fetchone()
                         db_result= db_result[0]
 
                         #Edge case: If user has no candy or has less than the max steal amount
                         if db_result == 0:
-                            await interaction.response.send_message(f"You tried to steal candy from {target.mention}, but you got caught! Luckily, you are poor and have nothing to lose.")
+                            await interaction.response.send_message(f"You tried to steal candy from {target.mention}, but you got caught! Luckily, you have no candy in your bank and have nothing to lose.")
                             return
-                        elif db_result < 200:
-                            steal = random.randint(0, db_result)
                         else:
-                            steal = random.randint(0, 500)
-                        
+                            steal = int(0.1 * db_result)
+
                         await cursor.execute(f'UPDATE users SET robbed_cooldown = ? WHERE id = ?', ( executed_time, target_id))
-                        await cursor.execute(f'UPDATE users SET candy = candy - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
+                        await cursor.execute(f'UPDATE users SET bank = bank - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
                         
-                await interaction.response.send_message(f"You tried to steal candy from {target.mention}, but you got caught! The cops beat your fucking ass and you lost {steal} candy.")        
+                await interaction.response.send_message(f"🚨 You tried to steal candy from {target.mention}, but you got caught! The counselors beat your fucking ass and you got fined {steal} candy, taken directly from your bank...")        
                 logger.info(f"DB_UPDATE: Robbed fail {steal} candy from user: {user_name}'s id: {user_id}. User balance: {db_result}")
+                
+            # else: #Fail logic with flat rate
+            #     async with asqlite.connect('./database.db') as connection:
+            #         async with connection.cursor() as cursor:
+            #             await cursor.execute(f'SELECT candy FROM Users WHERE id = ?', (user_id,))
+            #             db_result = await cursor.fetchone()
+            #             db_result= db_result[0]
+
+            #             #Edge case: If user has no candy or has less than the max steal amount
+            #             if db_result == 0:
+            #                 await interaction.response.send_message(f"You tried to steal candy from {target.mention}, but you got caught! Luckily, you are poor and have nothing to lose.")
+            #                 return
+            #             elif db_result < 200:
+            #                 steal = random.randint(0, db_result)
+            #             else:
+            #                 steal = random.randint(0, 500)
+                        
+            #             await cursor.execute(f'UPDATE users SET robbed_cooldown = ? WHERE id = ?', ( executed_time, target_id))
+            #             await cursor.execute(f'UPDATE users SET candy = candy - ?, {cooldown_name} = ? WHERE id = ?', (steal, executed_time, user_id))
+                        
+            #     await interaction.response.send_message(f"🚨 You tried to steal candy from {target.mention}, but you got caught! The cops beat your fucking ass and you lost {steal} candy.")        
+            #     logger.info(f"DB_UPDATE: Robbed fail {steal} candy from user: {user_name}'s id: {user_id}. User balance: {db_result}")
                 
         elif not cooldown_data['user_on_cooldown'] and cooldown_data['target_on_cooldown']: #Target cant be robbed
             await interaction.response.send_message(f"This user can't be robbed for another {utils_cog.convert_seconds_to_string(target_time_left)} hours.")
@@ -894,6 +1012,22 @@ class UserCommands(commands.Cog):
             
     @app_commands.command(name="murder", description="Use your murder interaction and kill someone!")
     async def murder(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
+        
+        is_admin = target.get_role(637868242932858911)
+        is_owner = target.get_role(689473122423799900)
+        
+        if is_admin != None:
+            await interaction.response.send_message(f"You can't murder a camp counsellor! They have plot armor.", ephemeral=True)
+            return
+
+        if is_owner != None:
+            await interaction.response.send_message(f"You can't murder the Head Counselor! They have plot armor.", ephemeral=True)
+            return
+        
         if target.get_role(1421440686946783292) != None:
             await interaction.response.send_message(f"You tried to murder {target.name}, but they are already dead!", ephemeral=True)
             return
@@ -917,17 +1051,21 @@ class UserCommands(commands.Cog):
         
         if has_weapon:
             await target.add_roles(interaction.guild.get_role(1421440686946783292))
-            await interaction.response.send_message(f"You murdered {target.mention}, how brutal!", ephemeral=False)
+            await interaction.response.send_message(f"🔪 You murdered {target.mention}, how brutal!", ephemeral=False)
         else:
             role = interaction.guild.get_role(637868242932858911)
             channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
             await channel.send(f"{interaction.user.name} tried to murder {target.name} but failed! {role.mention}")
-            await interaction.response.send_message(f"{interaction.user.mention} approached {target.mention} attempting to kill them! But since they forgot to buy a weapon, {target.display_name} managed to escape and alert the camp counsellors!", ephemeral=False)
+            await interaction.response.send_message(f"😱 {interaction.user.mention} approached {target.mention} attempting to kill them! But since they forgot to buy a weapon, {target.display_name} managed to escape and alert the camp counsellors!", ephemeral=False)
         
     @app_commands.command(name="flower", description="Give a user a flower <3")
     async def flower(self, interaction: discord.Interaction, target: discord.Member):
-        if target.get_role(1420048933647814716) != None:
-            await interaction.response.send_message(f"Someone else beat you to the punch and already gave them a flower!", ephemeral=False)
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
+        if target.get_role(1421971324221526149) != None:
+            await interaction.response.send_message(f"Someone else beat you to the punch and already gave {target.mention} a flower! Guess you just dont care as much...", ephemeral=False)
             return
         
         if interaction.user.id == target.id:
@@ -945,10 +1083,18 @@ class UserCommands(commands.Cog):
                 await cursor.execute(f'UPDATE users SET flower_count = flower_count - 1 WHERE id = ?', (interaction.user.id,))
         
         await target.add_roles(interaction.guild.get_role(1421971324221526149))
-        await interaction.response.send_message(f"You gave a flower to {target.mention}, how cute!", ephemeral=False)
+        await interaction.response.send_message(f"🌸 You gave a flower to {target.mention}, how cute!", ephemeral=False)
         
     @app_commands.command(name="hero", description="Protect the user from the killer (they can still be killed by other camp goers!)")
     async def hero(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
+        
+        if target.get_role(1421440686946783292) != None:
+            await interaction.response.send_message(f"You tried to protect {target.name}, but they are already dead!", ephemeral=True)
+            return
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
@@ -968,6 +1114,10 @@ class UserCommands(commands.Cog):
         
     @app_commands.command(name="accusation", description="Make any accusation against another member or one of the counselors and see if you are right!")
     async def accusation(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         if interaction.user.id == target.id:
             await interaction.response.send_message(f"Just look in a mirror.")
@@ -984,12 +1134,16 @@ class UserCommands(commands.Cog):
                 await cursor.execute(f'UPDATE users SET accusation_count = accusation_count - 1 WHERE id = ?', (interaction.user.id,))
                 
         role = interaction.guild.get_role(637868242932858911)
-        await interaction.response.send_message(f"You have accused {target.mention} of a serious crime! Wait for a camp counselor before preceeding.", ephemeral=False)
+        await interaction.response.send_message(f"⚖️ You have accused {target.mention} of a serious crime! Wait for a camp counselor before proceeding.", ephemeral=False)
         channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
         await channel.send(f"{target.mention} has been accused by {interaction.user.mention}! {role.mention}")
         
     @app_commands.command(name="interrogate", description="Ask one of the counselors a line of questions they have to answer.")
     async def interrogate(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         if interaction.user.id == target.id:
             await interaction.response.send_message(f"You can't interrogate yourself goofy.")
@@ -1006,12 +1160,24 @@ class UserCommands(commands.Cog):
                 await cursor.execute(f'UPDATE users SET interrogation_count = interrogation_count - 1 WHERE id = ?', (interaction.user.id,))
                 
         role = interaction.guild.get_role(637868242932858911)
-        await interaction.response.send_message(f"You are interrogating {target.mention}! Lets see what they say.", ephemeral=False)
+        await interaction.response.send_message(f"🕵️ You are interrogating {target.mention}! Lets see what they say.", ephemeral=False)
         channel = discord.utils.get(interaction.guild.channels, name="shop-logs")
-        await channel.send(f"{target.mention} is being interrogated by {interaction.user.mention}!")
+        await channel.send(f"{target.mention} is being interrogated by {interaction.user.mention}! {role.mention}")
         
     @app_commands.command(name="make-a-sacrifice", description="Sacrifice one member to revive another.")
     async def makeasacrifice(self, interaction: discord.Interaction, sacrifice_target: discord.Member, revive_target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
+        
+        if interaction.user.get_role(1421440686946783292) != None:
+            await interaction.response.send_message(f"You tried to sacrifice {sacrifice_target.name}, but you cant use your ritual materials as a ghost!", ephemeral=True)
+            return
+        
+        if interaction.user.get_role(637868242932858911) != None or interaction.user.get_role(689473122423799900) != None:
+            await interaction.response.send_message(f"You tried to sacrifice {sacrifice_target.name}, but strangely their uniform seems to have a strange enchantment on it, protecting them.", ephemeral=False)
+            return
         
         if sacrifice_target.get_role(1421440686946783292) != None:
             await interaction.response.send_message(f"You tried to sacrifice {sacrifice_target.name}, but they are already dead!", ephemeral=True)
@@ -1034,10 +1200,14 @@ class UserCommands(commands.Cog):
         role = interaction.guild.get_role(1421440686946783292) #deceased role
         await sacrifice_target.add_roles(role)
         await revive_target.remove_roles(role)
-        await interaction.response.send_message(f"{interaction.user.mention} sacrificied {sacrifice_target.mention}! The demon accepted your offering, and brought {revive_target.mention} back to life.", ephemeral=False)
+        await interaction.response.send_message(f"🩸 {interaction.user.mention} sacrificed {sacrifice_target.mention}! The demon accepted your offering, and brought {revive_target.mention} back to life.", ephemeral=False)
         
     @app_commands.command(name="skinny-dip", description="Go skinny dipping! Don't get caught or you might get in trouble.")
     async def skinnydip(self, interaction: discord.Interaction):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
@@ -1053,6 +1223,10 @@ class UserCommands(commands.Cog):
     
     @app_commands.command(name="wedgie", description="Give someone a wedgie.")
     async def wedgie(self, interaction: discord.Interaction, target: discord.Member):
+        from cogs.utils import Utils
+        if Utils.is_pst_blocked():
+            await interaction.response.send_message("Commands are now blocked after the event cutoff.", ephemeral=True)
+            return
         
         async with asqlite.connect('./database.db') as connection:
             async with connection.cursor() as cursor:
@@ -1063,16 +1237,153 @@ class UserCommands(commands.Cog):
                     await interaction.response.send_message(f"You tried to give {target.name} a wedgie, but you are too weak!", ephemeral=False)
                     return
                 await cursor.execute(f'UPDATE users SET wedgie_count = wedgie_count - 1 WHERE id = ?', (interaction.user.id,))
-                await cursor.execute('SELECT bank FROM users WHERE id = ?', (target.id,))
-                original_bank = (await cursor.fetchone())[0]
+                # await cursor.execute('SELECT bank FROM users WHERE id = ?', (target.id,))
+                # original_bank = (await cursor.fetchone())[0]
                 
-                loss = random.randint(10,20)*0.001
-                new_bal = int(original_bank*(1-loss))
-                await cursor.execute(f'UPDATE users SET bank = ? WHERE id = ?', (new_bal,target.id))
-                new_bank = new_bal
+                # loss = random.randint(10,20)*0.001
+                # new_bal = int(original_bank*(1-loss))
+                # await cursor.execute(f'UPDATE users SET bank = ? WHERE id = ?', (new_bal,target.id))
+                # new_bank = new_bal
+             
+        await interaction.response.send_message(f"🩲 {interaction.user.mention} gave {target.mention} a wedgie!", ephemeral=False)        
+        #await interaction.response.send_message(f"{interaction.user.mention} gave {target.mention} a wedgie! Looks like they had deposited some candy in there and lost {original_bank-new_bank}", ephemeral=False)
+        #logger.info(f"DB_UPDATE: User: {target.name} id: {target.id} lost {original_bank-new_bank} candy. Old total: {original_bank} New total {new_bank}.")
+
+    async def get_total_users(self):
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                if EXCLUDED_USER_IDS:
+                    placeholders = ','.join(['?' for _ in EXCLUDED_USER_IDS])
+                    await cursor.execute(f"""
+                        SELECT COUNT(*) FROM Users 
+                        WHERE (candy + bank) > 0 
+                        AND id NOT IN ({placeholders})
+                    """, tuple(EXCLUDED_USER_IDS))
+                else:
+                    await cursor.execute("SELECT COUNT(*) FROM Users WHERE (candy + bank) > 0")
+                total_users = await cursor.fetchone()
+                total_users = total_users[0]
+                await connection.commit()
                 
-        await interaction.response.send_message(f"{interaction.user.mention} gave {target.mention} a wedgie! Looks like they had deposited some candy in there and lost {original_bank-new_bank}", ephemeral=False)
-        logger.info(f"DB_UPDATE: User: {target.name} id: {target.id} lost {original_bank-new_bank} candy. Old total: {original_bank} New total {new_bank}.")
+        return total_users
+
+    async def get_page_users(self, page):
+        offset = page * USERS_PER_PAGE
+        async with asqlite.connect('./database.db') as connection:
+            async with connection.cursor() as cursor:
+                if EXCLUDED_USER_IDS:
+                    placeholders = ','.join(['?' for _ in EXCLUDED_USER_IDS])
+                    query = f"""
+                        SELECT id, username, candy, bank, (candy + bank) as total 
+                        FROM Users 
+                        WHERE id NOT IN ({placeholders})
+                        ORDER BY total DESC 
+                        LIMIT ? OFFSET ?
+                    """
+                    await cursor.execute(query, tuple(EXCLUDED_USER_IDS) + (USERS_PER_PAGE, offset))
+                else:
+                    await cursor.execute("""
+                        SELECT id, username, candy, bank, (candy + bank) as total 
+                        FROM Users 
+                        ORDER BY total DESC 
+                        LIMIT ? OFFSET ?
+                    """, (USERS_PER_PAGE, offset))
+                data = await cursor.fetchall()
+                await connection.commit()
+                
+        return data
+
+    @app_commands.command(name="leaderboard", description="View the candy leaderboard")
+    async def leaderboard(self, interaction: discord.Interaction):
+        view = self.LeaderboardView(self, interaction.user, interaction.guild)
+        await view.initialize()
+        embed = await view.generate_embed()
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+
+    class LeaderboardView(discord.ui.View):
+        def __init__(self, cog, user, guild, page=0):
+            super().__init__(timeout=180)
+            self.cog = cog
+            self.user = user
+            self.guild = guild
+            self.page = page
+            self.total_users = 0
+            self.max_page = 0
+        
+        async def initialize(self):
+            self.total_users = await self.cog.get_total_users()
+            self.max_page = (self.total_users - 1) // USERS_PER_PAGE if self.total_users > 0 else 0
+            self.update_buttons()
+
+        async def generate_embed(self):
+            users = await self.cog.get_page_users(self.page)
+            embed = discord.Embed(
+                title="🏆 Candy Leaderboard 🏆",
+                description="Top users by total wealth (Candy + Bank)",
+                color=discord.Color.gold()
+            )
+            embed.set_author(name=f"Requested by {self.user.display_name}", icon_url=self.user.display_avatar.url)
+            embed.set_footer(text=f"Page {self.page + 1} of {self.max_page + 1}")
+            embed.set_thumbnail(url="https://images.halloweencostumes.com.au/products/12290/1-1/light-up-traditional-pumpkin-upd.jpg")
+
+            if not users:
+                embed.description = "No users found on the leaderboard."
+            else:
+                leaderboard_text = ""
+                for idx, (user_id, username, candy, bank, total) in enumerate(users, start=1):
+                    rank = (self.page * USERS_PER_PAGE) + idx
+                    
+                    # Medal emojis for top 3
+                    if rank == 1:
+                        medal = "🥇"
+                    elif rank == 2:
+                        medal = "🥈"
+                    elif rank == 3:
+                        medal = "🥉"
+                    else:
+                        medal = f"`#{rank}`"
+                    
+                    # Try to get the member's display name (nickname) from the guild
+                    display_name = username  # Default to DB username
+                    if self.guild:
+                        member = self.guild.get_member(user_id)
+                        if member:
+                            display_name = member.display_name
+                    
+                    leaderboard_text += f"{medal} **{display_name}**\n"
+                    #leaderboard_text += f"   💰 Total: **{total:,}** (🍬 {candy:,} + 🏦 {bank:,})\n\n"
+                    leaderboard_text += f"   💰 Total: **{total:,}**\n\n"
+                
+                embed.description = leaderboard_text
+
+            return embed
+
+        def update_buttons(self):
+            self.previous.disabled = self.page <= 0
+            self.next.disabled = self.page >= self.max_page
+
+        @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("Use your own leaderboard buster.", ephemeral=True)
+                return
+
+            if self.page > 0:
+                self.page -= 1
+                self.update_buttons()
+                await interaction.response.edit_message(embed=await self.generate_embed(), view=self)
+
+        @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user.id:
+                await interaction.response.send_message("Use your own leaderboard buster.", ephemeral=True)
+                return
+
+            if self.page < self.max_page:
+                self.page += 1
+                self.update_buttons()
+                await interaction.response.edit_message(embed=await self.generate_embed(), view=self)
+
 
 async def setup(bot: commands.Bot):
     

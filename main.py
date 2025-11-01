@@ -7,6 +7,7 @@ from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 import asyncio
 from datetime import date
+from datetime import date
 
 #Set the path to out current working directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +32,16 @@ def setup_logging():
     # Use dated filename from the start
     today = datetime.now().strftime('%Y-%m-%d')
     log_filename = os.path.join(log_dir, f'discord_bot_{today}.log')
+    # Use dated filename from the start
+    today = datetime.now().strftime('%Y-%m-%d')
+    log_filename = os.path.join(log_dir, f'discord_bot_{today}.log')
     
+    # Clear any existing handlers first
+    logger = logging.getLogger()
+    logger.handlers.clear()
+    
+    # Create file handler (append mode)
+    file_handler = logging.FileHandler(
     # Clear any existing handlers first
     logger = logging.getLogger()
     logger.handlers.clear()
@@ -41,8 +51,15 @@ def setup_logging():
         log_filename,
         encoding='utf-8',
         mode='a'  # Append, don't overwrite
+        encoding='utf-8',
+        mode='a'  # Append, don't overwrite
     )
     
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
     # Create formatter
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -57,10 +74,15 @@ def setup_logging():
     logger.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
     
+    # Configure discord logger
     # Configure discord logger
     discord_logger = logging.getLogger('discord')
     discord_logger.setLevel(logging.DEBUG)
+    discord_logger.propagate = True
+    
+    logger.info(f"Logging to {log_filename}")
     discord_logger.propagate = True
     
     logger.info(f"Logging to {log_filename}")
