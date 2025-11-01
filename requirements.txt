@@ -1,0 +1,5 @@
+discord.py>=2.0.0
+asqlite
+Pillow
+aiohttp
+python-dotenv
